@@ -38,10 +38,14 @@ Game.CONFIG = {
   },
 
   // --- Список уровней (для экрана выбора в меню). ---
+  // difficulty — ключ из Game.DIFFICULTIES (система сложности).
+  // Для уровня 1 сохраняем прежнюю карту. Остальные генерируются
+  // через Game.generateLevel по своей сложности (см. startGame).
   LEVELS: [
-    { id: 1, name: 'Уровень 1', unlocked: true },
-    { id: 2, name: 'Уровень 2', unlocked: false },
-    { id: 3, name: 'Уровень 3', unlocked: false }
+    // Уровень 1 использует сохранённую карту (прежний лёгкий уровень).
+    { id: 1, name: 'Уровень 1', difficulty: 'easy',   unlocked: true, map: Game.DEFAULT_MAP },
+    { id: 2, name: 'Уровень 2', difficulty: 'normal', unlocked: true, width: 88, seed: 2026 },
+    { id: 3, name: 'Уровень 3', difficulty: 'hard',   unlocked: false, width: 96, seed: 99 }
   ]
 };
 
@@ -203,23 +207,44 @@ Game.CONFIG = {
 
   /**
    * Запуск выбранного уровня.
+   * Карта и скорость определяются системой сложности (Game.DIFFICULTIES):
+   *  • уровень явно задаёт свою карту (map) — используем её;
+   *  • иначе генерируем карту через Game.generateLevel(difficulty).
+   * Скорость = базовая * множитель сложности.
    * @param {number} levelId - id уровня.
    */
   function startGame(levelId) {
     currentLevelId = levelId || 1;
     const lv = getLevelDef(currentLevelId);
+    const diff = Game.DIFFICULTIES[lv.difficulty] || Game.DIFFICULTIES.easy;
 
-    // Создаём уровень. Для уровня 1 — стандартная карта; прочие пока
-    // используют ту же карту (но заблокированы в меню).
+    // Определяем карту уровня.
+    let map = lv.map || null; // например, у уровня 1 сохранена прежняя карта
+    if (!map && typeof Game.generateLevel === 'function') {
+      map = Game.generateLevel(lv.difficulty, {
+        width: lv.width || 72,
+        seed: lv.seed || 7
+      });
+    }
+    if (!map) map = Game.DEFAULT_MAP;
+
+    // Скорость уровня зависит от сложности.
+    const speed = CONFIG.LEVEL.SPEED * (diff.speedMul || 1);
+
     level = new Game.Level({
       tileSize: CONFIG.LEVEL.TILE_SIZE,
-      speed: CONFIG.LEVEL.SPEED,
+      speed: speed,
       groundY: CONFIG.GROUND_Y,
-      map: lv.map || Game.DEFAULT_MAP
+      map: map
     });
 
     // Длина прохождения = ширина карты * размер клетки.
     runLength = level.mapWidth * CONFIG.LEVEL.TILE_SIZE;
+
+    // Выбранный уровень — в HUD/меню.
+    if (Game.ui && typeof Game.ui.setSelectedLevel === 'function') {
+      Game.ui.setSelectedLevel(currentLevelId);
+    }
 
     resetLevel();
     if (Game.ui) Game.ui.attempts = 0; // свежий забег

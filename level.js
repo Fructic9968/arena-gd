@@ -42,6 +42,142 @@ const DEFAULT_MAP = [
   ]
 ];
 
+/* ============================================================
+   СИСТЕМА СЛОЖНОСТИ УРОВНЕЙ.
+   Каждая сложность — набор числовых ограничений, по которым
+   генерируется карта. Ограничения подобраны из физики куба
+   (tile=40, gravity=2000, jumpSpeed=700, speed базовая=280):
+     • макс высота прыжка ~3.06 клетки;
+     • препятствие высотой 1 клетку можно перепрыгнуть шириной
+       до ~4.0 клеток (пока куб выше 40px);
+     • препятствие высотой 2 клетки — шириной до ~2.9 клеток.
+   Для НОВЫХ уровней карта строится функцией generateLevel()
+   строго в рамках ограничений соответствующей сложности.
+   ============================================================ */
+
+/**
+ * Таблица сложностей. Поля:
+ *  key           — идентификатор;
+ *  name          — отображаемое имя;
+ *  speedMul      — множитель скорости (1.0 = базовая);
+ *  rows          — число рядов карты (0 = нижний);
+ *  minGap        — минимальный зазор между препятствиями (в клетках);
+ *  maxHeight     — максимальная высота блока (в клетках);
+ *  maxWidth      — максимальная ширина блока для высоты 1;
+ *  allowDoubleSpike — разрешает двойной шип (2 клетки);
+ *  spikeOnBlock  — разрешает шип на вершине блока (сложно).
+ * Высоту 2 всегда ограничиваем шириной <=2 (по физике).
+ */
+Game.DIFFICULTIES = {
+  easy: {
+    key: 'easy', name: 'Лёгкий',
+    speedMul: 1.00, rows: 2, minGap: 5,
+    maxHeight: 1, maxWidth: 2,
+    allowDoubleSpike: false, spikeOnBlock: false
+  },
+  normal: {
+    key: 'normal', name: 'Средний',
+    speedMul: 1.12, rows: 2, minGap: 6,
+    maxHeight: 1, maxWidth: 3,
+    allowDoubleSpike: true, spikeOnBlock: false
+  },
+  hard: {
+    key: 'hard', name: 'Сложный',
+    speedMul: 1.22, rows: 3, minGap: 3,
+    maxHeight: 2, maxWidth: 3,
+    allowDoubleSpike: true, spikeOnBlock: true
+  }
+};
+
+/**
+ * Простой детерминированный ГПСЧ (Linear Congruential + mulberry32).
+ * Один и тот же seed всегда даёт одну и ту же карту.
+ * @param {number} a - зерно.
+ * @returns {function():number} функция, возвращающая число в [0,1).
+ */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Генерация карты уровня по заданной сложности.
+ * Гарантирует: разбег в начале, зазоры >= minGap, у препятствий
+ * высотой 2 ширина <= 2 (иначе непреодолимо по физике).
+ * @param {string} difficultyKey - ключ из Game.DIFFICULTIES.
+ * @param {object} [opts] - настройки.
+ * @param {number} [opts.width]    - ширина карты в клетках.
+ * @param {number} [opts.seed]     - зерно (детерминированность).
+ * @param {number} [opts.runway]   - разбег до первого препятствия (клетки).
+ * @returns {number[][]} карта (ряды сверху-вниз? НЕТ: индекс 0 = нижний ряд).
+ */
+Game.generateLevel = function (difficultyKey, opts) {
+  opts = opts || {};
+  const d = Game.DIFFICULTIES[difficultyKey] || Game.DIFFICULTIES.easy;
+  const width = opts.width || 72;
+  const seed = (opts.seed !== undefined) ? opts.seed : 1234;
+  const rng = mulberry32(seed);
+  const rows = d.rows;
+
+  // Карта: rows рядов по width клеток, заполнена нулями (пусто).
+  const map = [];
+  for (let r = 0; r < rows; r++) map.push(new Array(width).fill(0));
+
+  // Разбег до первого препятствия (реакция игрока).
+  const runway = (opts.runway !== undefined) ? opts.runway : Math.floor(width * 0.18);
+
+  let col = runway;
+  while (col < width - 1) {
+    const roll = rng();
+
+    if (roll < 0.45) {
+      // --- Блок-стена. ---
+      let h = 1;
+      if (d.maxHeight >= 2 && rng() < 0.30) h = 2;
+      let w;
+      if (h === 2) {
+        // У высоты 2 ширина <= 2 (иначе не перепрыгнуть по физике).
+        w = 1 + Math.floor(rng() * 2);
+      } else {
+        w = 1 + Math.floor(rng() * d.maxWidth);
+      }
+      w = Math.max(1, Math.min(w, width - col));
+
+      // Заливаем блок: ряды 0..h-1, колонки col..col+w-1.
+      for (let c = col; c < col + w; c++) {
+        for (let r = 0; r < h; r++) map[r][c] = 1;
+      }
+
+      // Шип на вершине блока (только для сложных уровней).
+      if (d.spikeOnBlock && h < rows && rng() < 0.5) {
+        map[h][col + w - 1] = 2;
+      }
+
+      col += w + d.minGap + Math.floor(rng() * 3);
+    } else if (roll < 0.72) {
+      // --- Одиночный шип. ---
+      map[0][col] = 2;
+      col += 1 + d.minGap + Math.floor(rng() * 3);
+    } else {
+      // --- Двойной шип (если разрешён), иначе одиночный. ---
+      if (d.allowDoubleSpike && col + 1 < width) {
+        map[0][col] = 2;
+        map[0][col + 1] = 2;
+        col += 2 + d.minGap + Math.floor(rng() * 3);
+      } else {
+        map[0][col] = 2;
+        col += 1 + d.minGap + Math.floor(rng() * 3);
+      }
+    }
+  }
+
+  return map;
+};
+
 /**
  * Класс уровня.
  */

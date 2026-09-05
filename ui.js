@@ -18,12 +18,17 @@ Game.ui = {
   menu: { view: 'main' },
   selectedLevel: 1,
 
-  // --- Список уровней для экрана выбора. ---
+  // --- Список уровней для экрана выбора (сложность из Game.DIFFICULTIES). ---
   levels: [
-    { id: 1, name: 'Уровень 1', unlocked: true },
-    { id: 2, name: 'Уровень 2', unlocked: false },
-    { id: 3, name: 'Уровень 3', unlocked: false }
+    { id: 1, name: 'Уровень 1', unlocked: true,  difficulty: Game.DIFFICULTIES.easy.name },
+    { id: 2, name: 'Уровень 2', unlocked: true,  difficulty: Game.DIFFICULTIES.normal.name },
+    { id: 3, name: 'Уровень 3', unlocked: false, difficulty: Game.DIFFICULTIES.hard.name }
   ],
+
+  /** Запомнить выбранный уровень (вызывается из core.js при старте). */
+  setSelectedLevel: function (id) {
+    this.selectedLevel = id;
+  },
 
   /**
    * Инициализация интерфейса.
@@ -277,10 +282,21 @@ Game.ui = {
     ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(card.name, card.x + card.w / 2, card.y + 116);
-    // Уровень — цифра.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.font = '16px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(card.unlocked ? 'Нажми, чтобы играть' : 'Скоро', card.x + card.w / 2, card.y + 146);
+
+    // Уровень — цифра / подпись.
+    if (card.unlocked) {
+      // Сложность уровня.
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.font = '16px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 140);
+      ctx.fillStyle = 'rgba(77, 208, 255, 0.9)';
+      ctx.fillText('Нажми, чтобы играть', card.x + card.w / 2, card.y + 160);
+    } else {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.font = '16px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 140);
+      ctx.fillText('Скоро', card.x + card.w / 2, card.y + 160);
+    }
 
     ctx.restore();
   },
@@ -344,18 +360,29 @@ Game.ui = {
   },
 
   /**
-   * Отрисовка ХУД: счётчик попыток (в левом верхнем углу, под FPS).
+   * Отрисовка ХУД: название уровня и счётчик попыток
+   * (в левом верхнем углу, под FPS).
    * @param {CanvasRenderingContext2D} ctx - контекст канваса.
    */
   renderHUD: function (ctx) {
+    const lv = this.levels.find(function (l) { return l.id === this.selectedLevel; }.bind(this));
+
     ctx.save();
+    // Название уровня + сложность.
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.fillRect(12, 48, 176, 30);
-    ctx.fillStyle = '#ffd54f';
+    ctx.fillRect(12, 48, 220, 30);
+    ctx.fillStyle = '#4dd0ff';
     ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
-    ctx.fillText('Попытка: ' + this.attempts, 26, 63);
+    ctx.fillText((lv ? lv.name : 'Уровень ' + this.selectedLevel) +
+                 (lv && lv.difficulty ? ' · ' + lv.difficulty : ''), 26, 63);
+
+    // Счётчик попыток.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(12, 84, 176, 30);
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillText('Попытка: ' + this.attempts, 26, 99);
     ctx.restore();
   },
 
