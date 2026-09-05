@@ -23,8 +23,56 @@ Game.customize = {
   cubeColor: '#4dd0ff',
   cubeModel: 'default',   // 'default' | 'face' | 'tech'
   shipColor: '#ffaa33',
-  shipModel: 'default'    // 'default' | 'jet' | 'dart'
+  shipModel: 'default',   // 'default' | 'jet' | 'dart'
+
+  // --- Сохранение/загрузка в localStorage (выбор запоминается). ---
+  STORAGE_KEY: 'gd.customize',
+
+  /** Сохранить текущие настройки в localStorage. */
+  save: function () {
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+        cubeColor: this.cubeColor, cubeModel: this.cubeModel,
+        shipColor: this.shipColor, shipModel: this.shipModel
+      }));
+    } catch (e) {
+      // localStorage недоступен (приватный режим и т.п.) — тихо игнорируем.
+    }
+  },
+
+  /** Загрузить настройки из localStorage (с валидацией). */
+  load: function () {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d) {
+        if (typeof d.cubeColor === 'string') this.cubeColor = d.cubeColor;
+        if (this._validModel('cube', d.cubeModel)) this.cubeModel = d.cubeModel;
+        if (typeof d.shipColor === 'string') this.shipColor = d.shipColor;
+        if (this._validModel('ship', d.shipModel)) this.shipModel = d.shipModel;
+      }
+    } catch (e) {
+      // Повреждённые данные — оставляем значения по умолчанию.
+    }
+  },
+
+  /** Проверить, что модель существует в списке. */
+  _validModel: function (kind, id) {
+    const list = (kind === 'cube') ? (Game.CUBE_MODELS || []) : (Game.SHIP_MODELS || []);
+    return list.some(function (m) { return m.id === id; });
+  },
+
+  /** Сбросить кастомизацию к значениям по умолчанию и сохранить. */
+  resetAll: function () {
+    this.cubeColor = '#4dd0ff'; this.cubeModel = 'default';
+    this.shipColor = '#ffaa33'; this.shipModel = 'default';
+    this.save();
+  }
 };
+
+// Загружаем сохранённый выбор сразу при старте (до первой отрисовки).
+Game.customize.load();
 
 // Палитра доступных цветов (общая для куба и самолёта).
 Game.PALETTE = ['#4dd0ff', '#ff4d4d', '#4caf50', '#ffd54f',

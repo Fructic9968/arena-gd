@@ -116,6 +116,17 @@ Game.ui = {
     return { x: 26, y: 22, w: 110, h: 44 };
   },
 
+  /** Прямоугольник кнопки «Сбросить» (кастомизация, правый верхний угол). */
+  _resetRect: function () {
+    const W = Game.CONFIG.LOGICAL_WIDTH;
+    return { x: W - 26 - 150, y: 22, w: 150, h: 44 };
+  },
+
+  /** Проверка: попадание в прямоугольник кнопки сброса. */
+  _isResetHit: function (x, y) {
+    return this._hit(this._resetRect(), x, y);
+  },
+
   // ============================================================
   //  ВЫБОР УРОВНЯ — карточки уровней
   // ============================================================
@@ -168,17 +179,26 @@ Game.ui = {
       case 'customize': {
         // Кнопка «назад».
         if (this._hit(this._backRect(), x, y)) { this.showMainMenu(); return null; }
+        // Кнопка «Сбросить» (вернуть настройки к значениям по умолчанию).
+        if (this._isResetHit(x, y)) {
+          if (Game.customize && typeof Game.customize.resetAll === 'function') {
+            Game.customize.resetAll();
+          }
+          return null;
+        }
         // Свотчи цвета и кнопки моделей.
         for (const hb of this._customizeHitboxes()) {
           if (this._hit(hb, x, y)) {
             if (hb.kind === 'color') {
               if (hb.target === 'cube') Game.customize.cubeColor = hb.value;
               else Game.customize.shipColor = hb.value;
+              Game.customize.save();
               return null;
             }
             if (hb.kind === 'model') {
               if (hb.target === 'cube') Game.customize.cubeModel = hb.value;
               else Game.customize.shipModel = hb.value;
+              Game.customize.save();
               return null;
             }
           }
@@ -438,6 +458,9 @@ Game.ui = {
 
     // Кнопка «назад».
     this._drawButton(ctx, this._backRect(), '← Назад', { bg: '#3a3a66', fontSize: 18 });
+
+    // Кнопка «Сбросить».
+    this._drawButton(ctx, this._resetRect(), '↺ Сбросить', { bg: '#7a3a3a', fontSize: 18 });
 
     // Заголовок.
     ctx.fillStyle = '#ffffff';
