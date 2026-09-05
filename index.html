@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Geometry Dash — клон (Canvas 2D)</title>
+
+  <!-- Подключаем стили игрового экрана -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Игровая сцена: канвас центрируется и масштабируется под 16:9 -->
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+  </div>
+
+  <!--
+    Модули подключаются в порядке зависимостей.
+    Порядок важен: вспомогательные модули (input, player, level, ui)
+    объявляют своё API в общем пространстве имён Game, а core.js —
+    главный файл — запускает всё и владеет игровым циклом.
+  -->
+  <script src="input.js"></script>  <!-- управление (Space / клик / тач, hold-to-jump) -->
+  <script src="player.js"></script> <!-- физика куба и коллизии -->
+  <script src="level.js"></script>  <!-- карта уровня и отрисовка блоков/шипов -->
+  <script src="ui.js"></script>      <!-- меню, экран смерти, счётчик попыток, прогресс-бар -->
+  <script src="core.js"></script>     <!-- игровой цикл, delta time, 16:9 canvas -->
+</body>
+</html>

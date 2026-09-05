@@ -1,0 +1,46 @@
+/* ============================================================
+   style.css — игровой экран (оболочка для Canvas 16:9)
+   ============================================================ */
+
+/* Сброс стилей: убираем внешние отступы и задаём box-sizing глобально */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* На весь экран, без прокрутки и без случайного увеличения по клику на тач-устройствах */
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0b1a;              /* тёмный фон вокруг игрового поля */
+  touch-action: none;               /* отключаем жесты браузера (важно для мобильного управления) */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Центрируем игровую сцену по горизонтали и вертикали */
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Канвас: размер и позиция задаются из JS под 16:9 и DPR.
+   Здесь — только базовый вид и мягкая тень по краям. */
+#game-canvas {
+  display: block;
+  background: #0e0e1f;               /* цвет игрового поля (фон уровня) */
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+}
