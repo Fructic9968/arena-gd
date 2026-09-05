@@ -1,7 +1,10 @@
 /* ============================================================
-   player.js — класс Player (куб-игрок).
-   Отвечает за физику куба: гравитацию, прыжок, скорость падения.
-   Координаты (x, y) задают ЛЕВЫЙ ВЕРХНИЙ угол спрайта куба.
+   player.js — класс Player (куб-игрок / самолёт).
+   Отвечает за физику и транспорт игрока:
+     • 'cube' — гравитация + прыжок (классика);
+     • 'ship' — самолёт: удержание = тяга вверх, отпустил = падение,
+                есть потолок и пол (гибридный режим уровня).
+   Координаты (x, y) задают ЛЕВЫЙ ВЕРХНИЙ угол спрайта.
    Ось Y направлена вниз: вверх = отрицательные значения.
    ============================================================ */
 
@@ -9,57 +12,65 @@
 window.Game = window.Game || {};
 
 /**
- * Класс куба-игрока.
+ * Класс игрока (куб или самолёт).
  */
 class Player {
   /**
    * @param {object} config - параметры создания.
    * @param {number} config.x        - стартовая X-координата (левая часть экрана).
    * @param {number} config.groundY  - Y-координата уровня земли (пола).
-   * @param {number} config.size     - размер куба в пикселях (квадрат).
-   * @param {number} config.gravity  - гравитация (px/с^2), положительное число вниз.
-   * @param {number} config.jumpSpeed - модуль скорости прыжка (px/с), вверх.
+   * @param {number} config.size     - размер спрайта в пикселях.
+   * @param {number} config.gravity  - гравитация куба (px/с^2), вниз.
+   * @param {number} config.jumpSpeed - модуль скорости прыжка куба (px/с).
    * @param {number} [config.hitboxScale] - доля размера спрайта под хитбокс (0..1).
+   * @param {object} [config.ship]   - параметры самолёта (см. Game.CONFIG.SHIP).
    */
   constructor(config) {
     // --- Начальные координаты (левая часть экрана) ---
     this.x = config.x;
 
-    // --- Условный уровень земли (пол). Касание куба = низ спрайта на этом Y. ---
+    // --- Условный уровень земли (пол). Касание = низ спрайта на этом Y. ---
     this.groundY = config.groundY;
 
-    // --- Размер куба (например, 40x40) ---
+    // --- Размер спрайта ---
     this.size = config.size;
 
-    // Стартовое положение — куб стоит на земле.
-    // Верхний левый угол = groundY - size (низ спрайта касается пола).
+    // Стартовое положение — игрок стоит на земле.
     this.y = this.groundY - this.size;
 
     // --- Хитбокс чуть меньше спрайта (точные коллизии AABB). ---
-    // 1.0 = хитбокс совпадает со спрайтом; 0.9 = на 10% меньше.
     this.hitboxScale = config.hitboxScale || 0.9;
 
-    // Позиция в прошлом кадре (нужна для надёжного определения приземления на блок).
+    // Позиция в прошлом кадре (для детекта приземления на блок).
     this.prevY = this.y;
 
-    // --- Скорость падения по вертикали (px/с). Отрицательное = вверх. ---
+    // --- Скорость падения/подъёма по вертикали (px/с). Отрицательное = вверх. ---
     this.velocityY = 0;
 
-    // --- Физика ---
+    // --- Физика куба ---
     this.gravity = config.gravity;       // ускорение вниз (px/с^2)
     this.jumpSpeed = config.jumpSpeed;   // модуль скорости прыжка (px/с)
 
-    // Флаг: куб сейчас на земле (нужен для проверки возможности прыжка).
+    // --- Физика самолёта (ship) ---
+    const ship = config.ship || {};
+    this.shipGravity = ship.gravity || 2400;   // падение, когда не зажато
+    this.shipThrust = ship.thrust || -5200;    // тяга, когда зажато (вверх)
+    this.shipMaxUp = ship.maxUp || 620;        // предел скорости вверх
+    this.shipMaxDown = ship.maxDown || 620;    // предел скорости вниз
+    this.ceilingY = ship.ceilingY || 90;       // потолок полёта (верхняя граница)
+
+    // --- Транспорт ---
+    this.mode = 'cube'; // 'cube' | 'ship'
+
+    // Флаг: игрок стоит на твёрдой опоре (пол или блок).
     this.onGround = true;
   }
 
   /**
-   * Хитбокс куба — прямоугольник чуть меньше спрайта.
-   * Используется для точных AABB-коллизий (шипы, торцы блоков).
+   * Хитбокс — прямоугольник чуть меньше спрайта.
    * @returns {{x: number, y: number, w: number, h: number}}
    */
   getHitbox() {
-    // Отступ от края спрайта, чтобы хитбокс был меньше.
     const inset = (this.size * (1 - this.hitboxScale)) / 2;
     return {
       x: this.x + inset,
@@ -69,13 +80,27 @@ class Player {
     };
   }
 
+  /** Текущий транспорт: 'cube' или 'ship'. */
+  getMode() { return this.mode; }
+
   /**
-   * Прыжок вверх: задаём отрицательную вертикальную скорость.
-   * Если куб уже в воздухе, прыжок не срабатывает (одиночный прыжок).
+   * Переключить транспорт (например, через портал).
+   * Сбрасывает вертикальную скорость и флаг опоры.
+   * @param {string} mode - 'cube' | 'ship'.
+   */
+  setMode(mode) {
+    if (mode !== 'cube' && mode !== 'ship') return;
+    this.mode = mode;
+    this.velocityY = 0;
+    this.onGround = false;
+    this.prevY = this.y;
+  }
+
+  /**
+   * Прыжок куба вверх (работает только в режиме 'cube' и на земле).
    */
   jump() {
-    if (!this.onGround) return;
-
+    if (this.mode !== 'cube' || !this.onGround) return;
     // Вверх = отрицательная скорость по оси Y (ось Y направлена вниз).
     this.velocityY = -this.jumpSpeed;
     this.onGround = false;
@@ -83,46 +108,161 @@ class Player {
 
   /**
    * Обновление физики на один кадр.
-   * Применяем гравитацию и не даём кубу провалиться ниже земли.
-   * @param {number} dt - delta time в секундах.
+   * @param {number} dt   - delta time в секундах.
+   * @param {boolean} held - признак того, что кнопка зажата (важно для самолёта).
    */
-  update(dt) {
-    // Запоминаем позицию до движения (для детекта приземления на блок).
+  update(dt, held) {
     this.prevY = this.y;
 
+    if (this.mode === 'ship') {
+      this._updateShip(dt, held);
+    } else {
+      this._updateCube(dt);
+    }
+  }
+
+  /**
+   * Физика куба: гравитация + движение + земля.
+   */
+  _updateCube(dt) {
     // 1. Гравитация увеличивает скорость падения.
     this.velocityY += this.gravity * dt;
-
-    // 2. Применяем скорость: перемещаем куб по вертикали.
+    // 2. Применяем скорость.
     this.y += this.velocityY * dt;
-
-    // 3. Не даём кубу провалиться ниже условного уровня земли.
-    const groundTop = this.groundY - this.size; // минимально допустимый Y (низ на полу)
+    // 3. Не даём провалиться ниже уровня земли.
+    const groundTop = this.groundY - this.size;
     if (this.y >= groundTop) {
-      this.y = groundTop;         // ставим ровно на землю
-      this.velocityY = 0;         // обнуляем скорость падения
-      this.onGround = true;       // куб на земле
+      this.y = groundTop;
+      this.velocityY = 0;
+      this.onGround = true;
     } else {
-      // Куб в воздухе.
       this.onGround = false;
     }
   }
 
   /**
-   * Отрисовка куба. Пока — простой цветной квадрат.
+   * Физика самолёта: тяга при удержании, падение без удержания,
+   * ограничение скорости и границы потолок/пол.
+   */
+  _updateShip(dt, held) {
+    // Тяга (вверх) или гравитация (вниз).
+    const accel = held ? (this.shipGravity + this.shipThrust) : this.shipGravity;
+    this.velocityY += accel * dt;
+
+    // Ограничение вертикальной скорости.
+    this.velocityY = Math.max(-this.shipMaxUp, Math.min(this.shipMaxDown, this.velocityY));
+
+    // Применяем скорость.
+    this.y += this.velocityY * dt;
+
+    // Пол (низ).
+    const groundTop = this.groundY - this.size;
+    if (this.y >= groundTop) {
+      this.y = groundTop;
+      this.velocityY = 0;
+      this.onGround = true;
+      return;
+    }
+
+    // Потолок (верх).
+    if (this.y <= this.ceilingY) {
+      this.y = this.ceilingY;
+      this.velocityY = 0;
+      this.onGround = true;
+      return;
+    }
+
+    // В свободном полёте.
+    this.onGround = false;
+  }
+
+  /**
+   * Отрисовка игрока: куб или самолёт в зависимости от режима.
    * @param {CanvasRenderingContext2D} ctx - контекст канваса.
    */
   draw(ctx) {
-    // Основная заливка куба.
+    if (this.mode === 'ship') this._drawShip(ctx);
+    else this._drawCube(ctx);
+  }
+
+  /** Отрисовка куба. */
+  _drawCube(ctx) {
     ctx.fillStyle = '#4dd0ff';
     ctx.fillRect(this.x, this.y, this.size, this.size);
-
-    // Скруглённый контур, чтобы куб визуально выделялся.
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = 2;
     ctx.strokeRect(this.x + 1, this.y + 1, this.size - 2, this.size - 2);
   }
+
+  /** Отрисовка самолёта (стилизованный корпус с крыльями и хвостом). */
+  _drawShip(ctx) {
+    const x = this.x, y = this.y, s = this.size;
+
+    ctx.save();
+
+    // --- Фюзеляж (вытянутый корпус). ---
+    ctx.fillStyle = '#ffaa33';
+    ctx.beginPath();
+    // закруглённый корпус слева направо
+    ctx.moveTo(x + s * 0.10, y + s * 0.42);
+    ctx.lineTo(x + s * 0.92, y + s * 0.38); // нос
+    ctx.lineTo(x + s * 0.92, y + s * 0.62);
+    ctx.lineTo(x + s * 0.18, y + s * 0.66);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Кабина/фонарь. ---
+    ctx.fillStyle = '#fff08a';
+    ctx.beginPath();
+    ctx.arc(x + s * 0.30, y + s * 0.44, s * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+
+    // --- Носовой блик. ---
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.70, y + s * 0.40);
+    ctx.lineTo(x + s * 0.92, y + s * 0.40);
+    ctx.lineTo(x + s * 0.92, y + s * 0.52);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Верхнее крыло. ---
+    ctx.fillStyle = '#ff7a2f';
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.30, y + s * 0.44);
+    ctx.lineTo(x + s * 0.48, y + s * 0.02);
+    ctx.lineTo(x + s * 0.62, y + s * 0.02);
+    ctx.lineTo(x + s * 0.48, y + s * 0.46);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Нижнее крыло. ---
+    ctx.fillStyle = '#d95f1f';
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.34, y + s * 0.62);
+    ctx.lineTo(x + s * 0.52, y + s * 0.98);
+    ctx.lineTo(x + s * 0.66, y + s * 0.98);
+    ctx.lineTo(x + s * 0.52, y + s * 0.62);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Хвост. ---
+    ctx.fillStyle = '#ff7a2f';
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.10, y + s * 0.42);
+    ctx.lineTo(x + s * 0.02, y + s * 0.18);
+    ctx.lineTo(x + s * 0.16, y + s * 0.36);
+    ctx.closePath();
+    ctx.fill();
+
+    // Контур.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.restore();
+  }
 }
 
-// Экспортируем класс в пространство имён игры, чтобы core.js мог создавать экземпляр.
+// Экспортируем класс в пространство имён игры.
 Game.Player = Player;

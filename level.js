@@ -86,6 +86,19 @@ Game.DIFFICULTIES = {
     speedMul: 1.24, rows: 3, minGap: 7,
     maxHeight: 2, maxWidth: 3,
     allowDoubleSpike: true, spikeOnBlock: false
+  },
+  // Безумный — самый сложный. Гибридный: первая часть — куб со ступеньками,
+  // затем портал переключает на самолёт (ship) до конца уровня.
+  // Сложность набирается скоростью, ступеньками и полётом, а не «нечестными»
+  // паттернами: двойные шипы отключены, стенки одиночные и проходимые.
+  insane: {
+    key: 'insane', name: 'Безумный',
+    speedMul: 1.32, rows: 3, minGap: 8,
+    // Обычные препятствия высоты 1 (сложность — скорость/ступеньки/самолёт);
+    // высоту 2 дают только ступеньки (специальный проходимый паттерн).
+    maxHeight: 1, maxWidth: 3,
+    allowDoubleSpike: false, spikeOnBlock: false,
+    stairs: true, hybrid: true
   }
 };
 
@@ -115,6 +128,110 @@ function mulberry32(a) {
  * @param {number} [opts.runway]   - разбег до первого препятствия (клетки).
  * @returns {number[][]} карта (ряды сверху-вниз? НЕТ: индекс 0 = нижний ряд).
  */
+/**
+ * Вспомогательная: расставить одно кубическое препятствие (стена/шип/двойной шип).
+ * Возвращает новую колонку после препятствия.
+ */
+function placeOneObstacle(map, rng, col, endCol, d) {
+  const rows = map.length;
+  const roll = rng();
+
+  if (roll < 0.45) {
+    // --- Блок-стена. ---
+    let h = 1;
+    if (d.maxHeight >= 2 && rng() < 0.30) h = 2;
+    let w;
+    if (h === 2) {
+      w = 1 + Math.floor(rng() * 2);   // у высоты 2 ширина <= 2 (по физике)
+    } else {
+      w = 1 + Math.floor(rng() * d.maxWidth);
+    }
+    w = Math.max(1, Math.min(w, endCol - col));
+
+    for (let c = col; c < col + w; c++) {
+      for (let r = 0; r < h; r++) map[r][c] = 1;
+    }
+    // Шип на вершине блока (для сложных уровней).
+    if (d.spikeOnBlock && h < rows && rng() < 0.5) {
+      map[h][col + w - 1] = 2;
+    }
+    return col + w + d.minGap + Math.floor(rng() * 3);
+  } else if (roll < 0.72) {
+    // --- Одиночный шип. ---
+    map[0][col] = 2;
+    return col + 1 + d.minGap + Math.floor(rng() * 3);
+  } else {
+    // --- Двойной шип (если разрешён), иначе одиночный. ---
+    if (d.allowDoubleSpike && col + 1 < endCol) {
+      map[0][col] = 2;
+      map[0][col + 1] = 2;
+      return col + 2 + d.minGap + Math.floor(rng() * 3);
+    }
+    map[0][col] = 2;
+    return col + 1 + d.minGap + Math.floor(rng() * 3);
+  }
+}
+
+/**
+ * Ступеньки: возрастающая лесенка из блоков (высота 1→2) с зазором
+ * между ступенями, по которой куб запрыгивает вверх. Возвращает новую колонку.
+ */
+function placeStairs(map, rng, col, endCol, d) {
+  // Ступеньки — специальный проходимый паттерн: высота до 2 (ряд сверху пустует),
+  // куб забирается «по шагам», приземляясь на каждую ступень.
+  const maxStepH = Math.min(2, Math.max(1, map.length - 1)); // 2 при 3+ рядах
+  const stepGap = 2;                              // пустых клеток между ступенями
+  const steps = Math.max(1, Math.min(2, maxStepH)); // 1 или 2 ступени вверх
+  let c = col;
+  for (let i = 0; i < steps && c < endCol; i++) {
+    const h = i + 1;
+    if (h > maxStepH) break;
+    for (let r = 0; r < h; r++) map[r][c] = 1;
+    c += 1 + stepGap;
+  }
+  // Каждая ступень — одиночная колонка; никаких широких «плато» высоты 2,
+  // чтобы каждую ступень можно было перепрыгнуть/запрыгнуть за один прыжок.
+  return c + d.minGap;
+}
+
+/**
+ * Ship-секция: полёт на самолёте между «стенами» (блоки разной высоты)
+ * и шипами. Большие зазоры, чтобы успеть набрать/сбросить высоту.
+ */
+function runShipPattern(map, rng, col, endCol, d) {
+  let c = col;
+  while (c < endCol - 1) {
+    // Мягкая секция полёта: стенки высоты 1 (ширина 1..2) и одиночные шипы.
+    // Большие зазоры — чтобы самолёт успевал набрать/сбросить высоту.
+    const roll = rng();
+    if (roll < 0.6) {
+      // Стена из блоков высоты 1.
+      let w = 1 + Math.floor(rng() * 2); // 1..2
+      w = Math.max(1, Math.min(w, endCol - c));
+      for (let c2 = c; c2 < c + w; c2++) map[0][c2] = 1;
+      c += w + d.minGap + Math.floor(rng() * 2);
+    } else {
+      // Одиночный шип.
+      map[0][c] = 2;
+      c += 1 + d.minGap + Math.floor(rng() * 2);
+    }
+  }
+}
+
+/**
+ * Генерация карты уровня по заданной сложности.
+ * Гарантирует: разбег в начале, зазоры >= minGap, у препятствий
+ * высотой 2 ширина <= 2 (иначе непреодолимо по физике).
+ * Если сложность `hybrid` — строит гибрид: куб-секция (со ступеньками),
+ * затем портал (тайл 3) и ship-секция (самолёт) до конца.
+ * @param {string} difficultyKey - ключ из Game.DIFFICULTIES.
+ * @param {object} [opts] - настройки.
+ * @param {number} [opts.width]    - ширина карты в клетках.
+ * @param {number} [opts.seed]     - зерно (детерминированность).
+ * @param {number} [opts.runway]   - разбег до первого препятствия (клетки).
+ * @param {number} [opts.portalAt] - доля ширины, где стоит портал (гибрид).
+ * @returns {number[][]} карта (индекс 0 = нижний ряд). Тайлы: 0 пусто, 1 блок, 2 шип, 3 портал.
+ */
 Game.generateLevel = function (difficultyKey, opts) {
   opts = opts || {};
   const d = Game.DIFFICULTIES[difficultyKey] || Game.DIFFICULTIES.easy;
@@ -127,50 +244,34 @@ Game.generateLevel = function (difficultyKey, opts) {
   const map = [];
   for (let r = 0; r < rows; r++) map.push(new Array(width).fill(0));
 
-  // Разбег до первого препятствия (реакция игрока).
-  const runway = (opts.runway !== undefined) ? opts.runway : Math.floor(width * 0.18);
+  const isHybrid = d.hybrid && opts.hybrid !== false;
 
-  let col = runway;
-  while (col < width - 1) {
-    const roll = rng();
-
-    if (roll < 0.45) {
-      // --- Блок-стена. ---
-      let h = 1;
-      if (d.maxHeight >= 2 && rng() < 0.30) h = 2;
-      let w;
-      if (h === 2) {
-        // У высоты 2 ширина <= 2 (иначе не перепрыгнуть по физике).
-        w = 1 + Math.floor(rng() * 2);
+  if (isHybrid) {
+    const portalCol = Math.floor(width * (opts.portalAt || 0.45));
+    // Куб-секция [0, portalCol): препятствия + ступеньки.
+    let col = (opts.runway !== undefined) ? opts.runway : Math.floor(portalCol * 0.3);
+    while (col < portalCol - 1) {
+      if (d.stairs && rng() < 0.25) {
+        col = placeStairs(map, rng, col, portalCol, d);
       } else {
-        w = 1 + Math.floor(rng() * d.maxWidth);
+        col = placeOneObstacle(map, rng, col, portalCol, d);
       }
-      w = Math.max(1, Math.min(w, width - col));
-
-      // Заливаем блок: ряды 0..h-1, колонки col..col+w-1.
-      for (let c = col; c < col + w; c++) {
-        for (let r = 0; r < h; r++) map[r][c] = 1;
-      }
-
-      // Шип на вершине блока (только для сложных уровней).
-      if (d.spikeOnBlock && h < rows && rng() < 0.5) {
-        map[h][col + w - 1] = 2;
-      }
-
-      col += w + d.minGap + Math.floor(rng() * 3);
-    } else if (roll < 0.72) {
-      // --- Одиночный шип. ---
-      map[0][col] = 2;
-      col += 1 + d.minGap + Math.floor(rng() * 3);
-    } else {
-      // --- Двойной шип (если разрешён), иначе одиночный. ---
-      if (d.allowDoubleSpike && col + 1 < width) {
-        map[0][col] = 2;
-        map[0][col + 1] = 2;
-        col += 2 + d.minGap + Math.floor(rng() * 3);
+    }
+    // Портал (тайл 3) чуть выше земли, чтобы был виден.
+    const portalRow = Math.min(1, rows - 1);
+    map[portalRow][portalCol] = 3;
+    // Небольшой «кик» — 1 клетка свободно перед порталом уже очищена.
+    // Ship-секция после портала до конца.
+    runShipPattern(map, rng, portalCol + 2, width, d);
+  } else {
+    // Обычная (куб) карта.
+    const runway = (opts.runway !== undefined) ? opts.runway : Math.floor(width * 0.18);
+    let col = runway;
+    while (col < width - 1) {
+      if (d.stairs && rng() < 0.25) {
+        col = placeStairs(map, rng, col, width, d);
       } else {
-        map[0][col] = 2;
-        col += 1 + d.minGap + Math.floor(rng() * 3);
+        col = placeOneObstacle(map, rng, col, width, d);
       }
     }
   }
@@ -211,7 +312,18 @@ class Level {
         this.map[r].push(0);
       }
     }
+
+    // Ищем порталы (тайл 3) — позиции переключения транспорта.
+    this.portalCols = [];
+    for (let r = 0; r < this.map.length; r++) {
+      for (let c = 0; c < this.mapWidth; c++) {
+        if (this.map[r][c] === 3) this.portalCols.push(c);
+      }
+    }
   }
+
+  /** Есть ли в уровне порталы (переключение на самолёт). */
+  hasPortals() { return this.portalCols.length > 0; }
 
   /**
    * Обновление уровня: двигаем мир влево с фиксированной скоростью.
@@ -258,6 +370,8 @@ class Level {
           this.drawBlock(ctx, screenX, screenY, ts);
         } else if (value === 2) {
           this.drawSpike(ctx, screenX, screenY, ts);
+        } else if (value === 3) {
+          this.drawPortal(ctx, screenX, screenY, ts);
         }
       }
     }
@@ -299,6 +413,35 @@ class Level {
   }
 
   /**
+   * Отрисовка портала переключения транспорта (мерцающее кольцо).
+   */
+  drawPortal(ctx, x, y, size) {
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    const r = size * 0.42;
+    const pulse = 0.5 + 0.5 * Math.sin(Game.gameTime !== undefined ? Game.gameTime : 0);
+
+    ctx.save();
+    // Внешнее свечение.
+    ctx.fillStyle = 'rgba(255, 77, 255, 0.10)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+    ctx.fill();
+    // Кольцо.
+    ctx.strokeStyle = '#ff4dff';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Внутренний блик (мигает).
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.25 + 0.35 * pulse) + ')';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
    * Обработка коллизий куба с уровнем (AABB).
    * Правила:
    *  • шип — мгновенная смерть;
@@ -330,7 +473,7 @@ class Level {
     for (let col = minCol; col <= maxCol && !died; col++) {
       for (let row = 0; row < rows && !died; row++) {
         const value = this.tileAt(col, row);
-        if (value === 0) continue;
+        if (value === 0 || value === 3) continue;   // пусто и портал — не препятствие
 
         const screenX = col * ts - this.offsetX;   // экранная X клетки
         const top = this.groundY - (row + 1) * ts; // верхний Y клетки

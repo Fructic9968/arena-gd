@@ -28,6 +28,15 @@ Game.CONFIG = {
     JUMP_SPEED: 700 // модуль скорости прыжка (px/с), вверх
   },
 
+  // --- Параметры самолёта (ship-режим). ---
+  SHIP: {
+    GRAVITY: 2400,   // падение, когда кнопка не зажата (px/с^2)
+    THRUST: -5200,   // тяга вверх при зажатии (px/с^2), отрицательное = вверх
+    MAX_UP: 620,     // предельная скорость подъёма (px/с)
+    MAX_DOWN: 620,   // предельная скорость снижения (px/с)
+    CEILING_Y: 90    // потолок полёта (верхняя граница по Y)
+  },
+
   // --- Параметры уровня. ---
   LEVEL: {
     TILE_SIZE: 40,       // размер клетки карты в пикселях
@@ -46,7 +55,10 @@ Game.CONFIG = {
     { id: 1, name: 'Уровень 1', difficulty: 'easy',   unlocked: true, map: Game.DEFAULT_MAP },
     { id: 2, name: 'Уровень 2', difficulty: 'normal', unlocked: true, width: 88, seed: 2026 },
     // Уровень 3 — сложный и в 3 раза длиннее уровня 2 (88*3 = 264 клетки).
-    { id: 3, name: 'Уровень 3', difficulty: 'hard',   unlocked: true, width: 264, seed: 99, runway: 18 }
+    { id: 3, name: 'Уровень 3', difficulty: 'hard',   unlocked: true, width: 264, seed: 99, runway: 18 },
+    // Уровень 4 — безумный, гибридный (куб со ступеньками → портал → самолёт)
+    // и в 3 раза длиннее уровня 3 (264*3 = 792 клетки). portalAt — позиция портала.
+    { id: 4, name: 'Уровень 4', difficulty: 'insane', unlocked: true, width: 792, seed: 4242, runway: 18, portalAt: 0.45 }
   ]
 };
 
@@ -116,7 +128,8 @@ Game.CONFIG = {
       groundY: CONFIG.GROUND_Y,
       size: CONFIG.PLAYER.SIZE,
       gravity: CONFIG.PLAYER.GRAVITY,
-      jumpSpeed: CONFIG.PLAYER.JUMP_SPEED
+      jumpSpeed: CONFIG.PLAYER.JUMP_SPEED,
+      ship: CONFIG.SHIP
     });
 
     // Привязываем управление к созданному игроку (hold-to-jump).
@@ -172,6 +185,7 @@ Game.CONFIG = {
     lastTime = timestamp;
 
     update(delta, timestamp);
+    Game.gameTime = gameTime; // для анимаций порталов и т.п.
     render();
 
     // Запрашиваем следующий кадр.
@@ -225,7 +239,8 @@ Game.CONFIG = {
       map = Game.generateLevel(lv.difficulty, {
         width: lv.width || 72,
         seed: lv.seed || 7,
-        runway: lv.runway
+        runway: lv.runway,
+        portalAt: lv.portalAt
       });
     }
     if (!map) map = Game.DEFAULT_MAP;
@@ -239,6 +254,12 @@ Game.CONFIG = {
       groundY: CONFIG.GROUND_Y,
       map: map
     });
+
+    // Настраиваем транспорт: стартуем на кубе, потолок полёта для самолёта.
+    if (player) {
+      player.ceilingY = CONFIG.SHIP.CEILING_Y;
+      player.setMode('cube');
+    }
 
     // Длина прохождения = ширина карты * размер клетки.
     runLength = level.mapWidth * CONFIG.LEVEL.TILE_SIZE;
@@ -297,9 +318,10 @@ Game.CONFIG = {
         goToMenu();
       } else {
         level.update(delta);       // мир движется влево
-        player.update(delta);      // физика куба
+        player.update(delta, held); // физика (куб или самолёт)
+        Game.transport = player.getMode(); // текущий транспорт для HUD
 
-        // Обрабатываем коллизии куба с уровнем.
+        // Обрабатываем коллизии с уровнем.
         const res = level.resolvePlayer(player);
 
         if (res && res.died) {
@@ -312,9 +334,20 @@ Game.CONFIG = {
           state = 'complete';
           stateTimer = RESTART_DELAY;
         } else {
-          // Механика hold-to-jump: пока кнопка зажата, куб прыгает
-          // сразу после приземления (в т.ч. на верх блока).
-          if (held && player.onGround) {
+          // Портал: если куб достиг портала, переключаем на самолёт.
+          if (player.getMode() === 'cube' && level.hasPortals()) {
+            const tile = CONFIG.LEVEL.TILE_SIZE;
+            for (const col of level.portalCols) {
+              const portalScreenX = col * tile - level.offsetX;
+              if (portalScreenX <= player.x + player.size) {
+                player.setMode('ship');
+                break;
+              }
+            }
+          }
+          // Механика hold-to-jump: только для куба.
+          // Для самолёта удержание уже обработано в player.update (тяга).
+          if (player.getMode() === 'cube' && held && player.onGround) {
             player.jump();
           }
         }
@@ -356,7 +389,10 @@ Game.CONFIG = {
       player.velocityY = 0;
       player.onGround = true;
       player.prevY = player.y;
+      player.setMode('cube');      // каждый забег начинаем на кубе
+      player.ceilingY = CONFIG.SHIP.CEILING_Y;
     }
+    Game.transport = (player && player.getMode) ? player.getMode() : 'cube';
     if (level) {
       level.offsetX = 0;
     }
@@ -383,10 +419,13 @@ Game.CONFIG = {
     // Отрисовываем условный уровень земли.
     drawGround();
 
-    // Отрисовываем уровень (блоки и шипы).
+    // Отрисовываем потолок полёта для гибридных (ship) уровней.
+    if (level && level.hasPortals()) drawCeiling();
+
+    // Отрисовываем уровень (блоки, шипы, порталы).
     if (level) level.render(ctx);
 
-    // Отрисовываем куб-игрока.
+    // Отрисовываем игрока (куб или самолёт).
     if (player) player.draw(ctx);
 
     // --- Интерфейс (ХУД). ---
@@ -429,6 +468,24 @@ Game.CONFIG = {
     ctx.beginPath();
     ctx.moveTo(0, CONFIG.GROUND_Y);
     ctx.lineTo(CONFIG.LOGICAL_WIDTH, CONFIG.GROUND_Y);
+    ctx.stroke();
+  }
+
+  /**
+   * Отрисовка потолка полёта (для ship-режима): линия и заливка выше неё.
+   * Ограничивает верхнюю границу траектории самолёта.
+   */
+  function drawCeiling() {
+    const cy = CONFIG.SHIP.CEILING_Y;
+    // Заливка области выше потолка.
+    ctx.fillStyle = '#10102a';
+    ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, cy);
+    // Линия потолка.
+    ctx.strokeStyle = '#5a5a88';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.lineTo(CONFIG.LOGICAL_WIDTH, cy);
     ctx.stroke();
   }
 

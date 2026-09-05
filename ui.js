@@ -22,7 +22,8 @@ Game.ui = {
   levels: [
     { id: 1, name: 'Уровень 1', unlocked: true, difficulty: Game.DIFFICULTIES.easy.name },
     { id: 2, name: 'Уровень 2', unlocked: true, difficulty: Game.DIFFICULTIES.normal.name },
-    { id: 3, name: 'Уровень 3', unlocked: true, difficulty: Game.DIFFICULTIES.hard.name }
+    { id: 3, name: 'Уровень 3', unlocked: true, difficulty: Game.DIFFICULTIES.hard.name },
+    { id: 4, name: 'Уровень 4', unlocked: true, difficulty: Game.DIFFICULTIES.insane.name }
   ],
 
   /** Запомнить выбранный уровень (вызывается из core.js при старте). */
@@ -121,9 +122,13 @@ Game.ui = {
 
   _menuLevelCards: function () {
     const w = 210, h = 170;
-    const xs = [140, 375, 610];
+    // Центрируем карточки: 4 уровня шириной 210 с зазором 20.
+    const n = this.levels.length;
+    const gap = 20;
+    const total = n * w + (n - 1) * gap;
+    const start = (Game.CONFIG.LOGICAL_WIDTH - total) / 2;
     return this.levels.map(function (lv, i) {
-      return { id: lv.id, name: lv.name, unlocked: lv.unlocked, x: xs[i], y: 200, w: w, h: h };
+      return { id: lv.id, name: lv.name, unlocked: lv.unlocked, x: start + i * (w + gap), y: 200, w: w, h: h };
     });
   },
 
@@ -383,6 +388,13 @@ Game.ui = {
     ctx.fillRect(12, 84, 176, 30);
     ctx.fillStyle = '#ffd54f';
     ctx.fillText('Попытка: ' + this.attempts, 26, 99);
+
+    // Текущий транспорт (куб / самолёт).
+    const transport = (Game.transport === 'ship') ? 'Самолёт' : 'Куб';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(12, 120, 176, 30);
+    ctx.fillStyle = '#8effa1';
+    ctx.fillText('Транспорт: ' + transport, 26, 135);
     ctx.restore();
   },
 
