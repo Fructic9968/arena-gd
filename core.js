@@ -271,6 +271,12 @@ Game.CONFIG = {
 
     resetLevel();
     if (Game.ui) Game.ui.attempts = 0; // свежий забег
+
+    // Учитываем новый запуск уровня (для счётчика статистики).
+    if (Game.records && typeof Game.records.addRun === 'function') {
+      Game.records.addRun(currentLevelId);
+    }
+
     state = 'playing';
     stateTimer = 0;
   }
@@ -334,12 +340,20 @@ Game.CONFIG = {
               : ((Game.customize && Game.customize.cubeColor) || '#4dd0ff');
             Game.Particles.burst(player.x + player.size / 2, player.y + player.size / 2, pc, 22);
           }
+          // Записываем лучший достигнутый процент прохождения.
+          if (Game.records && typeof Game.records.recordProgress === 'function') {
+            Game.records.recordProgress(currentLevelId, getProgress());
+          }
           // Шип или торец блока — переход на экран смерти.
           state = 'dead';
           stateTimer = RESTART_DELAY;
           if (Game.ui && typeof Game.ui.onDeath === 'function') Game.ui.onDeath();
         } else if (getProgress() >= 1) {
           // Достигнут финиш — переход на экран победы.
+          // Помечаем уровень пройденным; сохраняем флаг «новый рекорд».
+          if (Game.records && typeof Game.records.recordProgress === 'function') {
+            Game.recordWasImproved = Game.records.recordProgress(currentLevelId, 1);
+          }
           state = 'complete';
           stateTimer = RESTART_DELAY;
         } else {

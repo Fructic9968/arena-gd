@@ -127,6 +127,17 @@ Game.ui = {
     return this._hit(this._resetRect(), x, y);
   },
 
+  /** Прямоугольник кнопки «Сбросить рекорды» (экран выбора уровня, правый верхний угол). */
+  _recordsResetRect: function () {
+    const W = Game.CONFIG.LOGICAL_WIDTH;
+    return { x: W - 26 - 180, y: 22, w: 180, h: 44 };
+  },
+
+  /** Проверка: попадание в прямоугольник кнопки сброса рекордов. */
+  _isRecordsResetHit: function (x, y) {
+    return this._hit(this._recordsResetRect(), x, y);
+  },
+
   // ============================================================
   //  ВЫБОР УРОВНЯ — карточки уровней
   // ============================================================
@@ -166,6 +177,11 @@ Game.ui = {
       case 'levels': {
         // Кнопка «назад».
         if (this._hit(this._backRect(), x, y)) { this.showMainMenu(); return null; }
+        // Кнопка «Сбросить рекорды».
+        if (this._isRecordsResetHit(x, y)) {
+          if (Game.records && typeof Game.records.reset === 'function') Game.records.reset();
+          return null;
+        }
         // Карточки уровней.
         for (const card of this._menuLevelCards()) {
           if (this._hit(card, x, y)) {
@@ -270,8 +286,20 @@ Game.ui = {
   },
 
   _renderMenuMain: function (ctx) {
+    const cx = Game.CONFIG.LOGICAL_WIDTH / 2;
     for (const b of this._menuMainButtons()) {
       this._drawButton(ctx, b, b.label, { bg: b.bg, color: '#ffffff', fontSize: 26 });
+    }
+
+    // Статистика: сколько уровней пройдено и общий рекорд.
+    if (Game.records) {
+      const done = Game.records.completedCount();
+      const total = this.levels.length;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.font = '17px "Segoe UI", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Пройдено уровней: ' + done + ' из ' + total, cx, 474);
     }
   },
 
@@ -281,12 +309,21 @@ Game.ui = {
     // Кнопка «назад».
     this._drawButton(ctx, this._backRect(), '← Назад', { bg: '#3a3a66', fontSize: 18 });
 
+    // Кнопка «Сбросить рекорды».
+    this._drawButton(ctx, this._recordsResetRect(), '↺ Сбросить рекорды', { bg: '#7a3a3a', fontSize: 16 });
+
     // Заголовок.
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 44px "Segoe UI", Arial, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     ctx.fillText('Выбор уровня', cx, 90);
+
+    // Счётчик пройденных уровней.
+    const done = (Game.records && Game.records.completedCount()) || 0;
+    ctx.fillStyle = 'rgba(77, 208, 255, 0.85)';
+    ctx.font = '17px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Пройдено ' + done + ' из ' + this.levels.length + ' уровней', cx, 132);
 
     // Карточки.
     for (const card of this._menuLevelCards()) {
@@ -306,7 +343,7 @@ Game.ui = {
 
     // Иконка уровня (кубик) / замок.
     const iconX = card.x + card.w / 2 - 20;
-    const iconY = card.y + 24;
+    const iconY = card.y + 14;
     if (card.unlocked) {
       this._drawCubeIcon(ctx, iconX, iconY, 40, '#4dd0ff');
     } else {
@@ -322,21 +359,42 @@ Game.ui = {
     ctx.fillStyle = card.unlocked ? '#ffffff' : 'rgba(200, 200, 210, 0.7)';
     ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(card.name, card.x + card.w / 2, card.y + 116);
+    ctx.fillText(card.name, card.x + card.w / 2, card.y + 78);
 
-    // Уровень — цифра / подпись.
+    // Значок «Пройден» в правом верхнем углу (если уровень пройден).
+    if (card.unlocked && Game.records && Game.records.isDone(card.id)) {
+      ctx.fillStyle = '#4caf50';
+      ctx.beginPath();
+      ctx.arc(card.x + card.w - 26, card.y + 22, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✓', card.x + card.w - 26, card.y + 23);
+    }
+
     if (card.unlocked) {
+      // Рекорд прохождения (лучший процент).
+      const best = (Game.records && Game.records.bestFor(card.id)) || 0;
+      ctx.fillStyle = '#ffd54f';
+      ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Рекорд: ' + best + '%', card.x + card.w / 2, card.y + 104);
+
       // Сложность уровня.
       ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.font = '16px "Segoe UI", Arial, sans-serif';
-      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 140);
+      ctx.font = '15px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 126);
+
+      // Подсказка.
       ctx.fillStyle = 'rgba(77, 208, 255, 0.9)';
-      ctx.fillText('Нажми, чтобы играть', card.x + card.w / 2, card.y + 160);
+      ctx.font = '14px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Нажми, чтобы играть', card.x + card.w / 2, card.y + 150);
     } else {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.font = '16px "Segoe UI", Arial, sans-serif';
-      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 140);
-      ctx.fillText('Скоро', card.x + card.w / 2, card.y + 160);
+      ctx.font = '15px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Сложность: ' + (card.difficulty || '—'), card.x + card.w / 2, card.y + 126);
+      ctx.fillText('Скоро', card.x + card.w / 2, card.y + 150);
     }
 
     ctx.restore();
@@ -612,12 +670,19 @@ Game.ui = {
     ctx.fillStyle = '#ffd54f';
     ctx.font = 'bold 30px "Segoe UI", Arial, sans-serif';
     ctx.fillText('Попытка: ' + this.attempts, cx, H / 2 + 6);
+
+    // Лучший результат этого уровня.
+    const best = (Game.records && Game.records.bestFor(this.selectedLevel)) || 0;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = '20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Лучший результат: ' + best + '%', cx, H / 2 + 36);
+
     ctx.fillStyle = '#cccccc';
     ctx.font = '20px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Зажми или тапни, чтобы сыграть ещё раз', cx, H / 2 + 62);
+    ctx.fillText('Зажми или тапни, чтобы сыграть ещё раз', cx, H / 2 + 70);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.font = '16px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Esc — в меню', cx, H / 2 + 102);
+    ctx.fillText('Esc — в меню', cx, H / 2 + 108);
     ctx.restore();
   },
 
@@ -640,12 +705,25 @@ Game.ui = {
     ctx.fillStyle = '#ffd54f';
     ctx.font = 'bold 30px "Segoe UI", Arial, sans-serif';
     ctx.fillText('Попыток: ' + this.attempts, cx, H / 2 + 6);
+
+    // Новый рекорд (если рекорд был улучшен в этом забеге).
+    if (Game.recordWasImproved) {
+      ctx.fillStyle = '#8effa1';
+      ctx.font = 'bold 26px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('🎉 Новый рекорд: 100%!', cx, H / 2 + 40);
+    } else {
+      const best = (Game.records && Game.records.bestFor(this.selectedLevel)) || 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.font = '20px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Лучший результат: ' + best + '%', cx, H / 2 + 40);
+    }
+
     ctx.fillStyle = '#cccccc';
     ctx.font = '20px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Зажми или тапни, чтобы сыграть ещё раз', cx, H / 2 + 62);
+    ctx.fillText('Зажми или тапни, чтобы сыграть ещё раз', cx, H / 2 + 76);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.font = '16px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Esc — в меню', cx, H / 2 + 102);
+    ctx.fillText('Esc — в меню', cx, H / 2 + 116);
     ctx.restore();
   }
 };
