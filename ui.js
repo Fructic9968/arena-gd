@@ -166,7 +166,23 @@ Game.ui = {
       }
 
       case 'customize': {
+        // Кнопка «назад».
         if (this._hit(this._backRect(), x, y)) { this.showMainMenu(); return null; }
+        // Свотчи цвета и кнопки моделей.
+        for (const hb of this._customizeHitboxes()) {
+          if (this._hit(hb, x, y)) {
+            if (hb.kind === 'color') {
+              if (hb.target === 'cube') Game.customize.cubeColor = hb.value;
+              else Game.customize.shipColor = hb.value;
+              return null;
+            }
+            if (hb.kind === 'model') {
+              if (hb.target === 'cube') Game.customize.cubeModel = hb.value;
+              else Game.customize.shipModel = hb.value;
+              return null;
+            }
+          }
+        }
         return null;
       }
     }
@@ -216,8 +232,8 @@ Game.ui = {
     ctx.font = '20px "Segoe UI", Arial, sans-serif';
     ctx.fillText('клон на HTML5 Canvas', cx, 158);
 
-    // Декоративный кубик слева от заголовка.
-    this._drawCubeIcon(ctx, 150, 86, 48, '#4dd0ff');
+    // Декоративный кубик слева от заголовка (текущий цвет кастомизации).
+    this._drawCubeIcon(ctx, 150, 86, 48, (Game.customize && Game.customize.cubeColor) || '#4dd0ff');
 
     // Переключение по виду меню.
     switch (this.menu.view) {
@@ -306,6 +322,117 @@ Game.ui = {
     ctx.restore();
   },
 
+  // ============================================================
+  //  КАСТОМИЗАЦИЯ: цвета и модели куба / самолёта
+  // ============================================================
+
+  /**
+   * Хитбоксы элементов кастомизации (свотчи цвета + кнопки моделей).
+   * Возвращает массив объектов вида {kind:'color'|'model', target, value, ...rect}.
+   */
+  _customizeHitboxes: function () {
+    const out = [];
+    const palette = Game.PALETTE || [];
+    const cubeModels = Game.CUBE_MODELS || [];
+    const shipModels = Game.SHIP_MODELS || [];
+    const panelW = 420, gap = 30;
+    const leftX = 40, rightX = leftX + panelW + gap;
+    const py = 150, panelH = 330;
+
+    // --- ЛЕВАЯ панель: КУБ. ---
+    // Свотчи цвета куба.
+    const swSize = 34, swGap = 12, swY = py + 204;
+    palette.forEach(function (c, i) {
+      out.push({
+        kind: 'color', target: 'cube', value: c,
+        x: leftX + 24 + i * (swSize + swGap), y: swY, w: swSize, h: swSize
+      });
+    });
+    // Кнопки моделей куба.
+    const mbY = py + 272, mbW = 116, mbH = 44, mbGap = 14;
+    cubeModels.forEach(function (m, i) {
+      out.push({
+        kind: 'model', target: 'cube', value: m.id, label: m.name,
+        x: leftX + 24 + i * (mbW + mbGap), y: mbY, w: mbW, h: mbH
+      });
+    });
+
+    // --- ПРАВАЯ панель: САМОЛЁТ. ---
+    palette.forEach(function (c, i) {
+      out.push({
+        kind: 'color', target: 'ship', value: c,
+        x: rightX + 24 + i * (swSize + swGap), y: swY, w: swSize, h: swSize
+      });
+    });
+    shipModels.forEach(function (m, i) {
+      out.push({
+        kind: 'model', target: 'ship', value: m.id, label: m.name,
+        x: rightX + 24 + i * (mbW + mbGap), y: mbY, w: mbW, h: mbH
+      });
+    });
+
+    this._customizeRects = { panelW: panelW, panelH: panelH, leftX: leftX, rightX: rightX, py: py };
+    return out;
+  },
+
+  /** Отрисовка схематичного самолёта (для превью/подписи), цвет из customize. */
+  _drawShipIcon: function (ctx, x, y, size) {
+    const c = (Game.customize && Game.customize.shipColor) || '#ffaa33';
+    const m = (Game.customize && Game.customize.shipModel) || 'default';
+    Game.drawShipModel(ctx, x, y, size, c, m);
+  },
+
+  /** Рисует панель кастомизации для одного транспорта (куб или самолёт). */
+  _renderCustomizePanel: function (ctx, x, y, w, h, target) {
+    const isCube = (target === 'cube');
+    const title = isCube ? 'Куб' : 'Самолёт';
+    const color = isCube ? Game.customize.cubeColor : Game.customize.shipColor;
+    const model = isCube ? Game.customize.cubeModel : Game.customize.shipModel;
+    const modelDef = (isCube ? Game.CUBE_MODELS : Game.SHIP_MODELS).find(function (m) { return m.id === model; });
+    const modelName = (modelDef && modelDef.name) || '—';
+
+    // --- Панель. ---
+    ctx.save();
+    ctx.fillStyle = 'rgba(40, 40, 60, 0.75)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(140, 120, 210, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+
+    // Заголовок панели.
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 26px "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(title, x + 24, y + 34);
+
+    // Превью (большой спрайт слева от надписи).
+    const pvSize = 84;
+    const pvX = x + w / 2 - pvSize / 2, pvY = y + 66;
+    if (isCube) {
+      Game.drawCubeModel(ctx, pvX, pvY, pvSize, color, model);
+    } else {
+      this._drawShipIcon(ctx, pvX, pvY, pvSize);
+    }
+
+    // Подпись текущей модели под превью.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(modelName, x + w / 2, y + 156);
+
+    // Метка «Цвет».
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.font = 'bold 15px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Цвет', x + 24, y + 184);
+
+    // Метка «Модель».
+    ctx.fillText('Модель', x + 24, y + 258);
+
+    ctx.restore();
+  },
+
   _renderMenuCustomize: function (ctx) {
     const cx = Game.CONFIG.LOGICAL_WIDTH / 2;
 
@@ -319,36 +446,49 @@ Game.ui = {
     ctx.textAlign = 'center';
     ctx.fillText('Кастомизация', cx, 90);
 
-    // Плашка-заглушка.
-    const pw = 460, ph = 220;
-    const px = cx - pw / 2, py = 190;
-    ctx.fillStyle = 'rgba(40, 40, 60, 0.7)';
-    ctx.fillRect(px, py, pw, ph);
-    ctx.strokeStyle = 'rgba(120, 120, 140, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
+    const hb = this._customizeHitboxes();
+    const rects = this._customizeRects;
+    const panelW = rects.panelW, panelH = rects.panelH;
 
-    // Бейдж «скоро».
-    ctx.fillStyle = '#8e6bd5';
-    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('ЗАГЛУШКА · В РАЗРАБОТКЕ', cx, py + 48);
+    // Панели (куб слева, самолёт справа).
+    this._renderCustomizePanel(ctx, rects.leftX, rects.py, panelW, panelH, 'cube');
+    this._renderCustomizePanel(ctx, rects.rightX, rects.py, panelW, panelH, 'ship');
 
-    // Текст.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.font = '22px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Скоро здесь будут скины', cx, py + 110);
-    ctx.fillText('и цвета для куба', cx, py + 142);
-
-    // Несколько неактивных «свотчей» цвета (декорация).
-    const swatches = ['#4dd0ff', '#ff4d4d', '#4caf50', '#ffd54f', '#8e6bd5'];
-    for (let i = 0; i < swatches.length; i++) {
-      const sx = cx - 100 + i * 50;
-      ctx.fillStyle = swatches[i];
-      ctx.fillRect(sx, py + 165, 36, 36);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(sx + 0.5, py + 165.5, 35, 35);
+    // --- Рисуем свотчи цвета. ---
+    const swSize = 34;
+    for (const h of hb) {
+      if (h.kind === 'color') {
+        // Рамка-индикатор выбранного цвета.
+        const selected = (h.target === 'cube' ? (Game.customize.cubeColor === h.value)
+                                              : (Game.customize.shipColor === h.value));
+        // Свотч.
+        ctx.fillStyle = h.value;
+        ctx.fillRect(h.x, h.y, h.w, h.h);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(h.x + 0.5, h.y + 0.5, h.w - 1, h.h - 1);
+        // Выделение выбранного.
+        if (selected) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(h.x - 2, h.y - 2, h.w + 4, h.h + 4);
+          // Галочка.
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('✓', h.x + h.w / 2, h.y + h.h / 2);
+        }
+      } else if (h.kind === 'model') {
+        // Кнопка модели.
+        const selected = (h.target === 'cube' ? (Game.customize.cubeModel === h.value)
+                                              : (Game.customize.shipModel === h.value));
+        this._drawButton(ctx, h, h.label, {
+          bg: selected ? '#5a4fb0' : '#3a3a66',
+          border: selected ? '#ffffff' : 'rgba(0,0,0,0.5)',
+          color: '#ffffff', fontSize: 18
+        });
+      }
     }
   },
 

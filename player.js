@@ -11,6 +11,243 @@
 // Общее пространство имён игры (создаём, если ещё не существует).
 window.Game = window.Game || {};
 
+// ============================================================
+//  КАСТОМИЗАЦИЯ: цвета и модели игрока.
+//  Эти настройки выбираются в меню (ui.js) и читаются здесь
+//  при отрисовке — и в игре, и в превью меню (через общие функции
+//  Game.drawCubeModel / Game.drawShipModel).
+// ============================================================
+
+// Текущий выбор игрока (куб и самолёт).
+Game.customize = {
+  cubeColor: '#4dd0ff',
+  cubeModel: 'default',   // 'default' | 'face' | 'tech'
+  shipColor: '#ffaa33',
+  shipModel: 'default'    // 'default' | 'jet' | 'dart'
+};
+
+// Палитра доступных цветов (общая для куба и самолёта).
+Game.PALETTE = ['#4dd0ff', '#ff4d4d', '#4caf50', '#ffd54f',
+                '#8e6bd5', '#ff7a2f', '#f45b9c', '#eeeeee'];
+
+// Список моделей куба (для меню кастомизации).
+Game.CUBE_MODELS = [
+  { id: 'default', name: 'Классика' },
+  { id: 'face', name: 'Мордашка' },
+  { id: 'tech', name: 'Техно' }
+];
+
+// Список моделей самолёта (для меню кастомизации).
+Game.SHIP_MODELS = [
+  { id: 'default', name: 'Винтокрыл' },
+  { id: 'jet', name: 'Реактив' },
+  { id: 'dart', name: 'Дротик' }
+];
+
+/**
+ * Затемнить/осветлить hex-цвет (#rrggbb) на коэффициент f.
+ * f>0 — светлее, f<0 — темнее.
+ * @param {string} hex - цвет.
+ * @param {number} f - коэффициент от -1 до 1.
+ * @returns {string}
+ */
+Game.shade = function (hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.round(Math.min(255, Math.max(0, r + 255 * f)));
+  g = Math.round(Math.min(255, Math.max(0, g + 255 * f)));
+  b = Math.round(Math.min(255, Math.max(0, b + 255 * f)));
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+};
+
+/**
+ * Отрисовка куба по модели. Используется и игроком, и превью в меню.
+ * @param {CanvasRenderingContext2D} ctx - контекст.
+ * @param {number} x   - левый верхний угол.
+ * @param {number} y   - левый верхний угол.
+ * @param {number} size - размер.
+ * @param {string} color - основной цвет.
+ * @param {string} model - 'default' | 'face' | 'tech'.
+ */
+Game.drawCubeModel = function (ctx, x, y, size, color, model) {
+  ctx.save();
+  // Основа.
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  // Рамка.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
+
+  if (model === 'face') {
+    // --- Мордашка: глаза и рот. ---
+    const eyeR = size * 0.11;
+    const eyeY = y + size * 0.38;
+    // Глаза.
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x + size * 0.32, eyeY, eyeR, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.68, eyeY, eyeR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222222';
+    ctx.beginPath();
+    ctx.arc(x + size * 0.34, eyeY, eyeR * 0.45, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.70, eyeY, eyeR * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    // Улыбка.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.lineWidth = Math.max(1.5, size * 0.05);
+    ctx.beginPath();
+    ctx.arc(x + size * 0.5, y + size * 0.52, size * 0.18, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+  } else if (model === 'tech') {
+    // --- Техно: панель с полосой и точками. ---
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.fillRect(x + size * 0.12, y + size * 0.42, size * 0.76, size * 0.18);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.beginPath();
+    ctx.arc(x + size * 0.30, y + size * 0.24, size * 0.07, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.44, y + size * 0.24, size * 0.07, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.30, y + size * 0.68, size * 0.07, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // --- Классика: блик сверху. ---
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.fillRect(x + 1, y + 1, size - 2, size * 0.3);
+  }
+
+  ctx.restore();
+};
+
+/**
+ * Отрисовка самолёта по модели.
+ * @param {CanvasRenderingContext2D} ctx - контекст.
+ * @param {number} x   - левый верхний угол.
+ * @param {number} y   - левый верхний угол.
+ * @param {number} size - размер.
+ * @param {string} color - основной цвет корпуса.
+ * @param {string} model - 'default' | 'jet' | 'dart'.
+ */
+Game.drawShipModel = function (ctx, x, y, size, color, model) {
+  const s = size;
+  const dark = Game.shade(color, -0.18); // темнее для крыльев/хвоста
+  ctx.save();
+
+  if (model === 'jet') {
+    // --- Реактивный: обтекаемый корпус + верхнее крыло + хвост. ---
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.06, y + s * 0.45);
+    ctx.lineTo(x + s * 0.95, y + s * 0.40); // нос
+    ctx.lineTo(x + s * 0.95, y + s * 0.62);
+    ctx.lineTo(x + s * 0.14, y + s * 0.65);
+    ctx.closePath();
+    ctx.fill();
+    // Кабина.
+    ctx.fillStyle = '#e8f6ff';
+    ctx.beginPath();
+    ctx.arc(x + s * 0.32, y + s * 0.44, s * 0.10, 0, Math.PI * 2);
+    ctx.fill();
+    // Верхнее крыло.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.28, y + s * 0.46);
+    ctx.lineTo(x + s * 0.46, y + s * 0.04);
+    ctx.lineTo(x + s * 0.58, y + s * 0.04);
+    ctx.lineTo(x + s * 0.46, y + s * 0.48);
+    ctx.closePath();
+    ctx.fill();
+    // Хвостовой стабилизатор.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.08, y + s * 0.45);
+    ctx.lineTo(x + s * 0.00, y + s * 0.16);
+    ctx.lineTo(x + s * 0.14, y + s * 0.36);
+    ctx.closePath();
+    ctx.fill();
+    // Реактивное сопло.
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(x + s * 0.02, y + s * 0.50, s * 0.08, s * 0.14);
+  } else if (model === 'dart') {
+    // --- Дротик: узкий треугольный со стреловидным крылом. ---
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.06, y + s * 0.60);
+    ctx.lineTo(x + s * 0.95, y + s * 0.50); // остриё
+    ctx.lineTo(x + s * 0.10, y + s * 0.30);
+    ctx.closePath();
+    ctx.fill();
+    // Грань-тень.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.10, y + s * 0.30);
+    ctx.lineTo(x + s * 0.95, y + s * 0.50);
+    ctx.lineTo(x + s * 0.55, y + s * 0.52);
+    ctx.closePath();
+    ctx.fill();
+    // Стреловидное крыло.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.16, y + s * 0.44);
+    ctx.lineTo(x + s * 0.30, y + s * 0.02);
+    ctx.lineTo(x + s * 0.44, y + s * 0.30);
+    ctx.closePath();
+    ctx.fill();
+    // Кабина.
+    ctx.fillStyle = '#e8f6ff';
+    ctx.beginPath();
+    ctx.arc(x + s * 0.24, y + s * 0.45, s * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // --- Винтокрыл: классический корпус с верхним/нижним крылом и хвостом. ---
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.10, y + s * 0.42);
+    ctx.lineTo(x + s * 0.92, y + s * 0.38);
+    ctx.lineTo(x + s * 0.92, y + s * 0.62);
+    ctx.lineTo(x + s * 0.18, y + s * 0.66);
+    ctx.closePath();
+    ctx.fill();
+    // Кабина.
+    ctx.fillStyle = '#fff08a';
+    ctx.beginPath();
+    ctx.arc(x + s * 0.30, y + s * 0.44, s * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    // Верхнее крыло.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.30, y + s * 0.44);
+    ctx.lineTo(x + s * 0.48, y + s * 0.02);
+    ctx.lineTo(x + s * 0.62, y + s * 0.02);
+    ctx.lineTo(x + s * 0.48, y + s * 0.46);
+    ctx.closePath();
+    ctx.fill();
+    // Нижнее крыло.
+    ctx.fillStyle = Game.shade(color, -0.32);
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.34, y + s * 0.62);
+    ctx.lineTo(x + s * 0.52, y + s * 0.98);
+    ctx.lineTo(x + s * 0.66, y + s * 0.98);
+    ctx.lineTo(x + s * 0.52, y + s * 0.62);
+    ctx.closePath();
+    ctx.fill();
+    // Хвост.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.10, y + s * 0.42);
+    ctx.lineTo(x + s * 0.02, y + s * 0.18);
+    ctx.lineTo(x + s * 0.16, y + s * 0.36);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Общий контур.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+};
+
 /**
  * Класс игрока (куб или самолёт).
  */
@@ -185,82 +422,18 @@ class Player {
     else this._drawCube(ctx);
   }
 
-  /** Отрисовка куба. */
+  /** Отрисовка куба (цвет и модель из кастомизации). */
   _drawCube(ctx) {
-    ctx.fillStyle = '#4dd0ff';
-    ctx.fillRect(this.x, this.y, this.size, this.size);
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(this.x + 1, this.y + 1, this.size - 2, this.size - 2);
+    const c = (Game.customize && Game.customize.cubeColor) || '#4dd0ff';
+    const m = (Game.customize && Game.customize.cubeModel) || 'default';
+    Game.drawCubeModel(ctx, this.x, this.y, this.size, c, m);
   }
 
-  /** Отрисовка самолёта (стилизованный корпус с крыльями и хвостом). */
+  /** Отрисовка самолёта (цвет и модель из кастомизации). */
   _drawShip(ctx) {
-    const x = this.x, y = this.y, s = this.size;
-
-    ctx.save();
-
-    // --- Фюзеляж (вытянутый корпус). ---
-    ctx.fillStyle = '#ffaa33';
-    ctx.beginPath();
-    // закруглённый корпус слева направо
-    ctx.moveTo(x + s * 0.10, y + s * 0.42);
-    ctx.lineTo(x + s * 0.92, y + s * 0.38); // нос
-    ctx.lineTo(x + s * 0.92, y + s * 0.62);
-    ctx.lineTo(x + s * 0.18, y + s * 0.66);
-    ctx.closePath();
-    ctx.fill();
-
-    // --- Кабина/фонарь. ---
-    ctx.fillStyle = '#fff08a';
-    ctx.beginPath();
-    ctx.arc(x + s * 0.30, y + s * 0.44, s * 0.11, 0, Math.PI * 2);
-    ctx.fill();
-
-    // --- Носовой блик. ---
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.moveTo(x + s * 0.70, y + s * 0.40);
-    ctx.lineTo(x + s * 0.92, y + s * 0.40);
-    ctx.lineTo(x + s * 0.92, y + s * 0.52);
-    ctx.closePath();
-    ctx.fill();
-
-    // --- Верхнее крыло. ---
-    ctx.fillStyle = '#ff7a2f';
-    ctx.beginPath();
-    ctx.moveTo(x + s * 0.30, y + s * 0.44);
-    ctx.lineTo(x + s * 0.48, y + s * 0.02);
-    ctx.lineTo(x + s * 0.62, y + s * 0.02);
-    ctx.lineTo(x + s * 0.48, y + s * 0.46);
-    ctx.closePath();
-    ctx.fill();
-
-    // --- Нижнее крыло. ---
-    ctx.fillStyle = '#d95f1f';
-    ctx.beginPath();
-    ctx.moveTo(x + s * 0.34, y + s * 0.62);
-    ctx.lineTo(x + s * 0.52, y + s * 0.98);
-    ctx.lineTo(x + s * 0.66, y + s * 0.98);
-    ctx.lineTo(x + s * 0.52, y + s * 0.62);
-    ctx.closePath();
-    ctx.fill();
-
-    // --- Хвост. ---
-    ctx.fillStyle = '#ff7a2f';
-    ctx.beginPath();
-    ctx.moveTo(x + s * 0.10, y + s * 0.42);
-    ctx.lineTo(x + s * 0.02, y + s * 0.18);
-    ctx.lineTo(x + s * 0.16, y + s * 0.36);
-    ctx.closePath();
-    ctx.fill();
-
-    // Контур.
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.restore();
+    const c = (Game.customize && Game.customize.shipColor) || '#ffaa33';
+    const m = (Game.customize && Game.customize.shipModel) || 'default';
+    Game.drawShipModel(ctx, this.x, this.y, this.size, c, m);
   }
 }
 
