@@ -281,6 +281,8 @@ Game.CONFIG = {
   function goToMenu() {
     state = 'menu';
     stateTimer = 0;
+    // Убираем частицы при возврате в меню.
+    if (Game.Particles && typeof Game.Particles.clear === 'function') Game.Particles.clear();
     if (Game.ui && typeof Game.ui.resetMenu === 'function') Game.ui.resetMenu();
   }
 
@@ -325,6 +327,13 @@ Game.CONFIG = {
         const res = level.resolvePlayer(player);
 
         if (res && res.died) {
+          // Эффект: взрыв/осколки на месте гибели (цвет из кастомизации).
+          if (Game.Particles && player) {
+            const pc = (Game.transport === 'ship')
+              ? ((Game.customize && Game.customize.shipColor) || '#ffaa33')
+              : ((Game.customize && Game.customize.cubeColor) || '#4dd0ff');
+            Game.Particles.burst(player.x + player.size / 2, player.y + player.size / 2, pc, 22);
+          }
           // Шип или торец блока — переход на экран смерти.
           state = 'dead';
           stateTimer = RESTART_DELAY;
@@ -366,6 +375,11 @@ Game.CONFIG = {
       }
     }
 
+    // Обновляем частицы (след/пыль/пламя) — каждый кадр, независимо от состояния.
+    if (Game.Particles && typeof Game.Particles.update === 'function') {
+      Game.Particles.update(delta);
+    }
+
     // Обновляем счётчик FPS.
     fpsFrames += 1;
     fpsAccumulator += delta;
@@ -396,6 +410,8 @@ Game.CONFIG = {
     if (level) {
       level.offsetX = 0;
     }
+    // Чистим частицы при старте/рестарте забега.
+    if (Game.Particles && typeof Game.Particles.clear === 'function') Game.Particles.clear();
   }
 
   /**
@@ -424,6 +440,12 @@ Game.CONFIG = {
 
     // Отрисовываем уровень (блоки, шипы, порталы).
     if (level) level.render(ctx);
+
+    // Отрисовываем частицы (след/пыль/пламя) — под игроком,
+    // чтобы персонаж был поверх эффектов, а не наоборот.
+    if (Game.Particles && typeof Game.Particles.draw === 'function') {
+      Game.Particles.draw(ctx);
+    }
 
     // Отрисовываем игрока (куб или самолёт).
     if (player) player.draw(ctx);

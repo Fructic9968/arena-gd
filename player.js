@@ -296,6 +296,191 @@ Game.drawShipModel = function (ctx, x, y, size, color, model) {
   ctx.restore();
 };
 
+// ============================================================
+//  ЭФФЕКТЫ: частицы и след за игроком.
+//  Небольшая система частиц для визуальных эффектов:
+//   • пыль при прыжке / приземлении куба;
+//   • скоростной след за кубом и самолётом;
+//   • пламя(выхлоп) самолёта при тяге;
+//   • осколки при смерти.
+//  Цвета берутся из кастомизации (Game.customize), поэтому
+//  эффекты автоматически подстраиваются под выбор игрока.
+//  Частицы живут в экранных координатах и летят ВЛЕВО — так
+//  создаётся ощущение быстро несущегося навстречу уровня.
+// ============================================================
+
+Game.Particles = (function () {
+  'use strict';
+
+  // Список живых частиц.
+  const items = [];
+  // Лимит одновременных частиц (защита от просадки FPS).
+  const MAX = 400;
+
+  // Случайное число в диапазоне [a, b].
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  /**
+   * Добавить одну частицу в общий массив.
+   * Если лимит превышен — удаляем самую старую (items.shift).
+   * @param {object} o - параметры частицы.
+   */
+  function spawn(o) {
+    if (items.length >= MAX) items.shift();
+    items.push({
+      x: o.x, y: o.y,              // позиция (экранные координаты)
+      vx: o.vx || 0, vy: o.vy || 0, // скорость приращения позиции (px/с)
+      life: o.life || 0.5,         // остаток жизни (сек)
+      maxLife: o.life || 0.5,      // исходная жизнь (для расчёта затухания 1→0)
+      size: o.size || 6,           // базовый размер
+      color: o.color || '#ffffff', // цвет
+      shape: o.shape || 'square',  // 'square' | 'circle' | 'flame'
+      gravity: o.gravity || 0,     // гравитация (px/с^2), вниз
+      shrink: o.shrink === undefined ? true : o.shrink, // уменьшать ли размер
+      alpha: o.alpha === undefined ? 1 : o.alpha         // базовая непрозрачность
+    });
+  }
+
+  // --- Публичное API. ---
+
+  return {
+    /**
+     * Обновить все частицы: двигаем, применяем гравитацию, убираем мёртвые.
+     * @param {number} dt - delta time (сек).
+     */
+    update: function (dt) {
+      for (let i = items.length - 1; i >= 0; i--) {
+        const p = items[i];
+        p.life -= dt;
+        if (p.life <= 0) { items.splice(i, 1); continue; }
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += p.gravity * dt;
+      }
+    },
+
+    /**
+     * Отрисовать все частицы. Непрозрачность и размер
+     * плавно падают к концу жизни.
+     * @param {CanvasRenderingContext2D} ctx - контекст канваса.
+     */
+    draw: function (ctx) {
+      ctx.save();
+      for (const p of items) {
+        const t = Math.max(0, p.life / p.maxLife); // 1 → 0
+        ctx.globalAlpha = t * p.alpha;
+        const s = p.shrink ? p.size * t : p.size;
+        ctx.fillStyle = p.color;
+
+        if (p.shape === 'circle') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(0.5, s * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.shape === 'flame') {
+          // «Язык» пламени, направленный влево (по ходу выхлопа самолёта).
+          ctx.beginPath();
+          ctx.moveTo(p.x + s * 0.5, p.y - s * 0.4);
+          ctx.lineTo(p.x - s * 0.7, p.y);
+          ctx.lineTo(p.x + s * 0.5, p.y + s * 0.4);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Квадрат (след/пыль) — центр по (x, y).
+          ctx.fillRect(p.x - s * 0.5, p.y - s * 0.5, s, s);
+        }
+      }
+      ctx.restore();
+    },
+
+    /** Очистить все частицы (напр., при переходе в меню / рестарте). */
+    clear: function () { items.length = 0; },
+
+    // ---------- Готовые «фабрики» эффектов ----------
+
+    /**
+     * Пыль при прыжке/приземлении: квадратики, разлетающиеся в стороны и падающие.
+     * @param {number} x, y - точка старта (обычно основание куба).
+     * @param {string} color - цвет (из кастомизации).
+     * @param {number} count - число частиц.
+     */
+    dust: function (x, y, color, count) {
+      count = count || 8;
+      for (let i = 0; i < count; i++) {
+        spawn({
+          x: x + rnd(-12, 12), y: y + rnd(-4, 4),
+          vx: rnd(-150, 150), vy: rnd(-90, 10),
+          life: rnd(0.3, 0.6), size: rnd(3, 6),
+          color: color, shape: 'square', gravity: 520, alpha: 0.7
+        });
+      }
+    },
+
+    /**
+     * Скоростной след: тающие квадраты, летящие влево.
+     * Создаёт ощущение стремительного движения уровня навстречу.
+     */
+    trail: function (x, y, color, count) {
+      count = count || 1;
+      for (let i = 0; i < count; i++) {
+        spawn({
+          x: x + rnd(-5, 5), y: y + rnd(-9, 9),
+          vx: rnd(-280, -130), vy: rnd(-22, 22),
+          life: rnd(0.25, 0.5), size: rnd(4, 9),
+          color: color, shape: 'square', gravity: 0, alpha: 0.5
+        });
+      }
+    },
+
+    /**
+     * Пламя выхлопа самолёта: светящиеся «языки» влево.
+     */
+    flame: function (x, y, color, count) {
+      count = count || 2;
+      for (let i = 0; i < count; i++) {
+        spawn({
+          x: x + rnd(-2, 2), y: y + rnd(-6, 6),
+          vx: rnd(-340, -190), vy: rnd(-30, 30),
+          life: rnd(0.16, 0.34), size: rnd(4, 8),
+          color: color, shape: 'flame', gravity: 0, alpha: 0.9, shrink: true
+        });
+      }
+    },
+
+    /**
+     * Дымок (в свободном полёте без тяги): приглушённые кружки влево.
+     */
+    smoke: function (x, y, color, count) {
+      count = count || 1;
+      for (let i = 0; i < count; i++) {
+        spawn({
+          x: x, y: y + rnd(-4, 4),
+          vx: rnd(-130, -60), vy: rnd(-10, 10),
+          life: rnd(0.3, 0.55), size: rnd(5, 8),
+          color: color, shape: 'circle', gravity: 0, alpha: 0.25
+        });
+      }
+    },
+
+    /**
+     * Взрыв/осколки при смерти: яркие искры разлетаются во все стороны.
+     */
+    burst: function (x, y, color, count) {
+      count = count || 18;
+      for (let i = 0; i < count; i++) {
+        const a = rnd(0, Math.PI * 2);
+        const sp = rnd(120, 380);
+        spawn({
+          x: x, y: y,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: rnd(0.4, 0.85), size: rnd(3, 6),
+          color: (i % 3 === 0) ? '#ffffff' : color,
+          shape: 'circle', gravity: 760, alpha: 0.9, shrink: true
+        });
+      }
+    }
+  };
+})();
+
 /**
  * Класс игрока (куб или самолёт).
  */
@@ -389,6 +574,11 @@ class Player {
     // Вверх = отрицательная скорость по оси Y (ось Y направлена вниз).
     this.velocityY = -this.jumpSpeed;
     this.onGround = false;
+    // Эффект: пыль при отталкивании от земли.
+    if (Game.Particles) {
+      Game.Particles.dust(this.x + this.size / 2, this.y + this.size,
+                          (Game.customize && Game.customize.cubeColor) || '#4dd0ff', 8);
+    }
   }
 
   /**
@@ -410,6 +600,9 @@ class Player {
    * Физика куба: гравитация + движение + земля.
    */
   _updateCube(dt) {
+    // Запоминаем, был ли игрок на земле в начале кадра (для детекта приземления).
+    const wasOnGround = this.onGround;
+
     // 1. Гравитация увеличивает скорость падения.
     this.velocityY += this.gravity * dt;
     // 2. Применяем скорость.
@@ -417,11 +610,28 @@ class Player {
     // 3. Не даём провалиться ниже уровня земли.
     const groundTop = this.groundY - this.size;
     if (this.y >= groundTop) {
+      const impact = this.velocityY; // скорость в момент касания
       this.y = groundTop;
       this.velocityY = 0;
       this.onGround = true;
+
+      // Эффект: пыль при приземлении (если падали достаточно быстро).
+      if (!wasOnGround && impact > 150 && Game.Particles) {
+        Game.Particles.dust(this.x + this.size / 2, this.y + this.size,
+                            (Game.customize && Game.customize.cubeColor) || '#4dd0ff', 9);
+      }
     } else {
       this.onGround = false;
+    }
+
+    // Эффект: скоростной след позади куба.
+    // На земле — лёгкий бегущий след у пола, в полёте — по центру куба.
+    if (Game.Particles) {
+      const pc = (Game.customize && Game.customize.cubeColor) || '#4dd0ff';
+      const cx = this.x + this.size / 2;
+      const cy = this.onGround ? (this.y + this.size - 4) : (this.y + this.size / 2);
+      // Не каждый кадр, чтобы след был лёгким и не перегружал сцену.
+      if (Math.random() < 0.8) Game.Particles.trail(cx, cy, pc, 1);
     }
   }
 
@@ -459,6 +669,19 @@ class Player {
 
     // В свободном полёте.
     this.onGround = false;
+
+    // Эффект: выхлоп/пламя у кормы самолёта.
+    // Тяга — яркое пламя; свободный полёт — лёгкий дымок.
+    if (Game.Particles) {
+      const sc = (Game.customize && Game.customize.shipColor) || '#ffaa33';
+      const rearX = this.x + 2;             // корма (левая часть спрайта)
+      const rearY = this.y + this.size * 0.5;
+      if (held) {
+        Game.Particles.flame(rearX, rearY, sc, 2);
+      } else {
+        Game.Particles.smoke(rearX, rearY, sc, 1);
+      }
+    }
   }
 
   /**
