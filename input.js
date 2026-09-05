@@ -3,6 +3,8 @@
    Перехватывает ввод: Space, стрелка вверх, клик мыши, тач.
    Реализует hold-to-jump: пока кнопка зажата, куб прыгает сразу
    при приземлении (проверка состояния зажатости ведётся в цикле core.js).
+   Дополнительно собирает: координаты клика (для кнопок меню) и
+   нажатие Esc (возврат из игры в меню).
    ============================================================ */
 
 // Общее пространство имён игры.
@@ -12,6 +14,12 @@ window.Game = window.Game || {};
 Game.input = {
   // Флаг: кнопка прыжка сейчас зажата (для hold-to-jump).
   _held: false,
+
+  // Последний клик с координатами в логических единицах (960x540).
+  _click: null,
+
+  // Флаг: было ли нажатие Esc (возврат в меню).
+  _menuPressed: false,
 
   // Ссылка на игрока (куб). Задаётся из core.js через setTarget().
   _target: null,
@@ -25,7 +33,20 @@ Game.input = {
     const canvas = document.getElementById('game-canvas');
     if (!canvas) return;
 
-    // --- Клавиатура: Space и стрелка вверх. ---
+    // Преобразует координаты события мыши/тача в логические единицы.
+    // Канвас CSS-масштабируется, поэтому пересчитываем через bounding rect
+    // относительно логического разрешения 960x540.
+    function logicalCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const sx = Game.CONFIG.LOGICAL_WIDTH / rect.width;
+      const sy = Game.CONFIG.LOGICAL_HEIGHT / rect.height;
+      return {
+        x: (e.clientX - rect.left) * sx,
+        y: (e.clientY - rect.top) * sy
+      };
+    }
+
+    // --- Клавиатура: Space, стрелка вверх (прыжок) и Esc (меню). ---
     function isJumpKey(e) {
       return e.code === 'Space' || e.key === ' ' || e.key === 'ArrowUp';
     }
@@ -35,6 +56,9 @@ Game.input = {
         // Не даём браузеру прокручивать страницу по пробелу/стрелке.
         e.preventDefault();
         self._held = true;
+      } else if (e.key === 'Escape') {
+        // Возврат в главное меню.
+        self._menuPressed = true;
       }
     });
 
@@ -46,10 +70,11 @@ Game.input = {
 
     // --- Указатель: мышь + тач через Pointer Events (современный единый API). ---
     if (window.PointerEvent) {
-      // Нажатие на канвас — зажимаем.
+      // Нажатие на канвас — зажимаем и фиксируем координаты клика.
       canvas.addEventListener('pointerdown', function (e) {
         e.preventDefault();
         self._held = true;
+        self._click = logicalCoords(e);
       });
       // Отпускание/отмена в любом месте окна — отпускаем.
       window.addEventListener('pointerup', function () {
@@ -63,6 +88,7 @@ Game.input = {
       canvas.addEventListener('mousedown', function (e) {
         e.preventDefault();
         self._held = true;
+        self._click = logicalCoords(e);
       });
       window.addEventListener('mouseup', function () {
         self._held = false;
@@ -72,6 +98,7 @@ Game.input = {
       canvas.addEventListener('touchstart', function (e) {
         e.preventDefault();
         self._held = true;
+        if (e.touches && e.touches.length) self._click = logicalCoords(e.touches[0]);
       }, { passive: false });
       window.addEventListener('touchend', function (e) {
         e.preventDefault();
@@ -99,5 +126,26 @@ Game.input = {
    */
   isHeld: function () {
     return this._held;
+  },
+
+  /**
+   * Забрать (и обнулить) координаты последнего клика в логических единицах.
+   * Используется меню для определения нажатой кнопки.
+   * @returns {{x: number, y: number}|null}
+   */
+  consumeClick: function () {
+    const c = this._click;
+    this._click = null;
+    return c;
+  },
+
+  /**
+   * Забрать (и обнулить) флаг нажатия Esc (возврат в меню).
+   * @returns {boolean}
+   */
+  consumeMenuPressed: function () {
+    const m = this._menuPressed;
+    this._menuPressed = false;
+    return m;
   }
 };

@@ -32,10 +32,17 @@ Game.CONFIG = {
   LEVEL: {
     TILE_SIZE: 40,       // размер клетки карты в пикселях
     SPEED: 280,          // скорость движения уровня влево (px/с)
-    // Длина прохождения уровня = ширина карты (72 клетки) * TILE_SIZE.
-    // Финиш срабатывает ровно в конце первой серии препятствий.
+    // Длина прохождения уровня по умолчанию (пересчитывается при старте
+    // в зависимости от ширины карты выбранного уровня).
     RUN_LENGTH: 2880
-  }
+  },
+
+  // --- Список уровней (для экрана выбора в меню). ---
+  LEVELS: [
+    { id: 1, name: 'Уровень 1', unlocked: true },
+    { id: 2, name: 'Уровень 2', unlocked: false },
+    { id: 3, name: 'Уровень 3', unlocked: false }
+  ]
 };
 
 // -------------------- Приватное состояние модуля --------------------
@@ -54,11 +61,16 @@ Game.CONFIG = {
   let player = null;   // экземпляр класса Player (куб)
   let level = null;    // экземпляр класса Level
 
+  // Выбранный уровень и длина прохождения (пересчитывается на старте).
+  let currentLevelId = 1;
+  let runLength = CONFIG.LEVEL.RUN_LENGTH;
+
   // --- Состояние игры (конечный автомат). ---
+  // 'menu'     — главное меню / выбор уровня / кастомизация;
   // 'playing'  — обычный геймплей;
   // 'dead'     — игрок погиб, показан экран смерти;
   // 'complete' — уровень пройден, показан экран победы.
-  let state = 'playing';
+  let state = 'menu';
 
   // --- Таймер паузы перед рестартом (сек). ---
   // Позволяет игроку увидеть экран смерти/победы, а не
@@ -92,14 +104,8 @@ Game.CONFIG = {
     if (Game.input && typeof Game.input.init === 'function') Game.input.init();
     if (Game.ui && typeof Game.ui.init === 'function') Game.ui.init();
 
-    // Создаём уровень из конфигурации (с картой по умолчанию).
-    level = new Game.Level({
-      tileSize: CONFIG.LEVEL.TILE_SIZE,
-      speed: CONFIG.LEVEL.SPEED,
-      groundY: CONFIG.GROUND_Y
-    });
-
     // Создаём игрока (куб) из конфигурации.
+    // Уровень создаётся при старте (startGame), так как карта зависит от выбора.
     player = new Game.Player({
       x: CONFIG.PLAYER.X,
       groundY: CONFIG.GROUND_Y,
@@ -112,6 +118,10 @@ Game.CONFIG = {
     if (Game.input && typeof Game.input.setTarget === 'function') {
       Game.input.setTarget(player);
     }
+
+    // Стартуем в главном меню.
+    state = 'menu';
+    if (Game.ui && typeof Game.ui.resetMenu === 'function') Game.ui.resetMenu();
 
     // Фиксируем опорную точку времени и запускаем цикл.
     lastTime = performance.now();
@@ -165,18 +175,71 @@ Game.CONFIG = {
 
   /**
    * Текущий прогресс прохождения уровня (доля в диапазоне 0..1).
-   * Считается как пройденное расстояние относительно RUN_LENGTH.
+   * Считается как пройденное расстояние относительно runLength.
    * @returns {number}
    */
   function getProgress() {
     if (!level) return 0;
-    return level.offsetX / CONFIG.LEVEL.RUN_LENGTH;
+    return level.offsetX / runLength;
   }
 
   /**
-   * Обновление игровой логики: время, FPS, движение уровня,
+   * Список уровней из конфигурации.
+   * @returns {Array}
+   */
+  function getLevelList() {
+    return CONFIG.LEVELS || [];
+  }
+
+  /**
+   * Получить описание уровня по id.
+   * @param {number} id - id уровня.
+   * @returns {object}
+   */
+  function getLevelDef(id) {
+    const found = getLevelList().find(function (lv) { return lv.id === id; });
+    return found || getLevelList()[0];
+  }
+
+  /**
+   * Запуск выбранного уровня.
+   * @param {number} levelId - id уровня.
+   */
+  function startGame(levelId) {
+    currentLevelId = levelId || 1;
+    const lv = getLevelDef(currentLevelId);
+
+    // Создаём уровень. Для уровня 1 — стандартная карта; прочие пока
+    // используют ту же карту (но заблокированы в меню).
+    level = new Game.Level({
+      tileSize: CONFIG.LEVEL.TILE_SIZE,
+      speed: CONFIG.LEVEL.SPEED,
+      groundY: CONFIG.GROUND_Y,
+      map: lv.map || Game.DEFAULT_MAP
+    });
+
+    // Длина прохождения = ширина карты * размер клетки.
+    runLength = level.mapWidth * CONFIG.LEVEL.TILE_SIZE;
+
+    resetLevel();
+    if (Game.ui) Game.ui.attempts = 0; // свежий забег
+    state = 'playing';
+    stateTimer = 0;
+  }
+
+  /**
+   * Возврат в главное меню.
+   */
+  function goToMenu() {
+    state = 'menu';
+    stateTimer = 0;
+    if (Game.ui && typeof Game.ui.resetMenu === 'function') Game.ui.resetMenu();
+  }
+
+  /**
+   * Обновление игровой логики: время, FPS, меню, движение уровня,
    * физика игрока, коллизии, hold-to-jump и конечный автомат
-   * состояний (playing / dead / complete).
+   * состояний (menu / playing / dead / complete).
    */
   function update(delta, timestamp) {
     gameTime += delta;
@@ -184,34 +247,56 @@ Game.CONFIG = {
     // Признак того, что кнопка прыжка сейчас зажата.
     const held = Game.input && typeof Game.input.isHeld === 'function' &&
                  Game.input.isHeld();
+    // Было ли нажатие Esc (возврат в меню).
+    const menuPressed = Game.input && typeof Game.input.consumeMenuPressed === 'function' &&
+                        Game.input.consumeMenuPressed();
+    // Координаты последнего клика (важны только в меню; в игре сбрасываем).
+    const click = Game.input && typeof Game.input.consumeClick === 'function'
+      ? Game.input.consumeClick() : null;
 
-    if (state === 'playing' && player && level) {
-      // --- Активный геймплей. ---
-      level.update(delta);       // мир движется влево
-      player.update(delta);      // физика куба
+    if (state === 'menu') {
+      // --- Главное меню: обрабатываем клики по кнопкам. ---
+      if (click) {
+        const action = Game.ui && typeof Game.ui.handleMenuClick === 'function'
+          ? Game.ui.handleMenuClick(click.x, click.y) : null;
 
-      // Обрабатываем коллизии куба с уровнем.
-      const res = level.resolvePlayer(player);
-
-      if (res && res.died) {
-        // Шип или торец блока — переход на экран смерти.
-        state = 'dead';
-        stateTimer = RESTART_DELAY;
-        if (Game.ui && typeof Game.ui.onDeath === 'function') Game.ui.onDeath();
-      } else if (getProgress() >= 1) {
-        // Достигнут финиш — переход на экран победы.
-        state = 'complete';
-        stateTimer = RESTART_DELAY;
-      } else {
-        // Механика hold-to-jump: пока кнопка зажата, куб прыгает
-        // сразу после приземления (в т.ч. на верх блока).
-        if (held && player.onGround) {
-          player.jump();
+        if (action && action.action === 'start') {
+          startGame(action.levelId);
         }
       }
-    } else if (state !== 'playing') {
-      // --- Экран смерти / победы: ждём ввода для рестарта. ---
-      if (stateTimer > 0) {
+    } else if (state === 'playing' && player && level) {
+      // --- Активный геймплей. ---
+      if (menuPressed) {
+        goToMenu();
+      } else {
+        level.update(delta);       // мир движется влево
+        player.update(delta);      // физика куба
+
+        // Обрабатываем коллизии куба с уровнем.
+        const res = level.resolvePlayer(player);
+
+        if (res && res.died) {
+          // Шип или торец блока — переход на экран смерти.
+          state = 'dead';
+          stateTimer = RESTART_DELAY;
+          if (Game.ui && typeof Game.ui.onDeath === 'function') Game.ui.onDeath();
+        } else if (getProgress() >= 1) {
+          // Достигнут финиш — переход на экран победы.
+          state = 'complete';
+          stateTimer = RESTART_DELAY;
+        } else {
+          // Механика hold-to-jump: пока кнопка зажата, куб прыгает
+          // сразу после приземления (в т.ч. на верх блока).
+          if (held && player.onGround) {
+            player.jump();
+          }
+        }
+      }
+    } else {
+      // --- Экран смерти / победы: ждём ввода. ---
+      if (menuPressed) {
+        goToMenu();
+      } else if (stateTimer > 0) {
         stateTimer -= delta;
       } else if (held) {
         // Кнопка зажата (или нажата заново) — рестарт уровня.
@@ -251,9 +336,19 @@ Game.CONFIG = {
   }
 
   /**
-   * Отрисовка кадра: фон, земля, уровень, куб, UI и счётчик FPS.
+   * Отрисовка кадра: меню или геймплей (фон, земля, уровень, куб,
+   * ХУД, экраны смерти/победы) и счётчик FPS.
    */
   function render() {
+    // --- Главное меню: только меню + FPS. ---
+    if (state === 'menu') {
+      if (Game.ui && typeof Game.ui.renderMenu === 'function') {
+        Game.ui.renderMenu(ctx, gameTime);
+      }
+      renderFPS();
+      return;
+    }
+
     // Очищаем холст (заливаем цветом фона уровня).
     ctx.fillStyle = CONFIG.BACKGROUND;
     ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
