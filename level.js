@@ -83,9 +83,9 @@ Game.DIFFICULTIES = {
   },
   hard: {
     key: 'hard', name: 'Сложный',
-    speedMul: 1.22, rows: 3, minGap: 3,
+    speedMul: 1.24, rows: 3, minGap: 7,
     maxHeight: 2, maxWidth: 3,
-    allowDoubleSpike: true, spikeOnBlock: true
+    allowDoubleSpike: true, spikeOnBlock: false
   }
 };
 

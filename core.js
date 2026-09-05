@@ -45,7 +45,8 @@ Game.CONFIG = {
     // Уровень 1 использует сохранённую карту (прежний лёгкий уровень).
     { id: 1, name: 'Уровень 1', difficulty: 'easy',   unlocked: true, map: Game.DEFAULT_MAP },
     { id: 2, name: 'Уровень 2', difficulty: 'normal', unlocked: true, width: 88, seed: 2026 },
-    { id: 3, name: 'Уровень 3', difficulty: 'hard',   unlocked: false, width: 96, seed: 99 }
+    // Уровень 3 — сложный и в 3 раза длиннее уровня 2 (88*3 = 264 клетки).
+    { id: 3, name: 'Уровень 3', difficulty: 'hard',   unlocked: true, width: 264, seed: 99, runway: 18 }
   ]
 };
 
@@ -223,7 +224,8 @@ Game.CONFIG = {
     if (!map && typeof Game.generateLevel === 'function') {
       map = Game.generateLevel(lv.difficulty, {
         width: lv.width || 72,
-        seed: lv.seed || 7
+        seed: lv.seed || 7,
+        runway: lv.runway
       });
     }
     if (!map) map = Game.DEFAULT_MAP;

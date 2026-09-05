@@ -20,9 +20,9 @@ Game.ui = {
 
   // --- Список уровней для экрана выбора (сложность из Game.DIFFICULTIES). ---
   levels: [
-    { id: 1, name: 'Уровень 1', unlocked: true,  difficulty: Game.DIFFICULTIES.easy.name },
-    { id: 2, name: 'Уровень 2', unlocked: true,  difficulty: Game.DIFFICULTIES.normal.name },
-    { id: 3, name: 'Уровень 3', unlocked: false, difficulty: Game.DIFFICULTIES.hard.name }
+    { id: 1, name: 'Уровень 1', unlocked: true, difficulty: Game.DIFFICULTIES.easy.name },
+    { id: 2, name: 'Уровень 2', unlocked: true, difficulty: Game.DIFFICULTIES.normal.name },
+    { id: 3, name: 'Уровень 3', unlocked: true, difficulty: Game.DIFFICULTIES.hard.name }
   ],
 
   /** Запомнить выбранный уровень (вызывается из core.js при старте). */
